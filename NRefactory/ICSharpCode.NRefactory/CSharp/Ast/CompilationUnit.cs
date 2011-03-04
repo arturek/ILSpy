@@ -28,7 +28,7 @@ using System.Collections.Generic;
 
 namespace ICSharpCode.NRefactory.CSharp
 {
-	public class CompilationUnit : AttributedNode
+	public class CompilationUnit : AstNode 
 	{
 		public static readonly Role<AstNode> MemberRole = new Role<AstNode>("Member", AstNode.Null);
 		

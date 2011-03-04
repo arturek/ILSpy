@@ -82,9 +82,10 @@ namespace Decompiler
 					Import = new SimpleType("System")
 				}, CompilationUnit.MemberRole);
 			
-			ConvertCustomAtributes(astCompileUnit, assemblyDefinition, AttributeTarget.Assembly);
+			ConvertCustomAttributes(astCompileUnit, assemblyDefinition, AttributeTarget.Assembly);
+			ConvertCustomAttributes(astCompileUnit, assemblyDefinition.MainModule, AttributeTarget.Module);
 
-			if(!onlyAssemblyLevel)
+			if (!onlyAssemblyLevel) {
 				foreach (TypeDefinition typeDef in assemblyDefinition.MainModule.Types)
 				{
 					// Skip nested types - they will be added by the parent type
@@ -94,6 +95,7 @@ namespace Decompiler
 
 					AddType(typeDef);
 				}
+			}
 		}
 		
 		NamespaceDeclaration GetCodeNamespace(string name)
@@ -164,8 +166,11 @@ namespace Decompiler
 				astType.ClassType = ClassType.Class;
 			}
 			
-			astType.TypeParameters.AddRange(MakeTypeParameters(typeDef.GenericParameters));
-			astType.Constraints.AddRange(MakeConstraints(typeDef.GenericParameters));
+			IEnumerable<GenericParameter> genericParameters = typeDef.GenericParameters;
+			if (typeDef.DeclaringType != null && typeDef.DeclaringType.HasGenericParameters)
+				genericParameters = genericParameters.Skip(typeDef.DeclaringType.GenericParameters.Count);
+			astType.TypeParameters.AddRange(MakeTypeParameters(genericParameters));
+			astType.Constraints.AddRange(MakeConstraints(genericParameters));
 			
 			// Nested types
 			foreach(TypeDefinition nestedTypeDef in typeDef.NestedTypes) {
@@ -181,7 +186,9 @@ namespace Decompiler
 				foreach (FieldDefinition field in typeDef.Fields) {
 					if (field.IsRuntimeSpecialName) {
 						// the value__ field
-						astType.AddChild(ConvertType(field.FieldType), TypeDeclaration.BaseTypeRole);
+						if (field.FieldType != typeDef.Module.TypeSystem.Int32) {
+							astType.AddChild(ConvertType(field.FieldType), TypeDeclaration.BaseTypeRole);
+						}
 					} else {
 						EnumMemberDeclaration enumMember = new EnumMemberDeclaration();
 						enumMember.Name = CleanName(field.Name);
@@ -205,7 +212,7 @@ namespace Decompiler
 				AddTypeMembers(astType, typeDef);
 			}
 
-			ConvertCustomAtributes(astType, typeDef);
+			ConvertCustomAttributes(astType, typeDef);
 			return astType;
 		}
 
@@ -267,10 +274,12 @@ namespace Decompiler
 					};
 				}
 				AstType baseType = ConvertType(gType.ElementType, typeAttributes, ref typeIndex);
+				List<AstType> typeArguments = new List<AstType>();
 				foreach (var typeArgument in gType.GenericArguments) {
 					typeIndex++;
-					baseType.AddChild(ConvertType(typeArgument, typeAttributes, ref typeIndex), AstType.Roles.TypeArgument);
+					typeArguments.Add(ConvertType(typeArgument, typeAttributes, ref typeIndex));
 				}
+				ApplyTypeArgumentsTo(baseType, typeArguments);
 				return baseType;
 			} else if (type is GenericParameter) {
 				return new SimpleType(type.Name);
@@ -337,6 +346,30 @@ namespace Decompiler
 //						nsType = new MemberType { Target = nsType, MemberName = parts[i] };
 //					}
 //					return new MemberType { Target = nsType, MemberName = name }.WithAnnotation(type);
+				}
+			}
+		}
+		
+		static void ApplyTypeArgumentsTo(AstType baseType, List<AstType> typeArguments)
+		{
+			SimpleType st = baseType as SimpleType;
+			if (st != null) {
+				st.TypeArguments.AddRange(typeArguments);
+			}
+			MemberType mt = baseType as MemberType;
+			if (mt != null) {
+				TypeReference type = mt.Annotation<TypeReference>();
+				if (type != null) {
+					int typeParameterCount;
+					ICSharpCode.NRefactory.TypeSystem.ReflectionHelper.SplitTypeParameterCountFromReflectionName(type.Name, out typeParameterCount);
+					if (typeParameterCount > typeArguments.Count)
+						typeParameterCount = typeArguments.Count;
+					mt.TypeArguments.AddRange(typeArguments.GetRange(typeArguments.Count - typeParameterCount, typeParameterCount));
+					typeArguments.RemoveRange(typeArguments.Count - typeParameterCount, typeParameterCount);
+					if (typeArguments.Count > 0)
+						ApplyTypeArgumentsTo(mt.Target, typeArguments);
+				} else {
+					mt.TypeArguments.AddRange(typeArguments);
 				}
 			}
 		}
@@ -499,24 +532,47 @@ namespace Decompiler
 				astMethod.Modifiers = ConvertModifiers(methodDef);
 				astMethod.Body = AstMethodBodyBuilder.CreateMethodBody(methodDef, context);
 			}
-			ConvertCustomAtributes(astMethod, methodDef);
-			ConvertCustomAtributes(astMethod, methodDef.MethodReturnType, AttributeTarget.Return);
+			ConvertCustomAttributes(astMethod, methodDef);
+			ConvertCustomAttributes(astMethod, methodDef.MethodReturnType, AttributeTarget.Return);
 			return astMethod;
 		}
 		
 		IEnumerable<TypeParameterDeclaration> MakeTypeParameters(IEnumerable<GenericParameter> genericParameters)
 		{
-			return genericParameters.Select(
-				gp => new TypeParameterDeclaration {
-					Name = CleanName(gp.Name),
-					Variance = gp.IsContravariant ? VarianceModifier.Contravariant : gp.IsCovariant ? VarianceModifier.Covariant : VarianceModifier.Invariant
-				});
+			foreach (var gp in genericParameters) {
+				TypeParameterDeclaration tp = new TypeParameterDeclaration();
+				tp.Name = CleanName(gp.Name);
+				if (gp.IsContravariant)
+					tp.Variance = VarianceModifier.Contravariant;
+				else if (gp.IsCovariant)
+					tp.Variance = VarianceModifier.Covariant;
+				ConvertCustomAttributes(tp, gp);
+				yield return tp;
+			}
 		}
 		
 		IEnumerable<Constraint> MakeConstraints(IEnumerable<GenericParameter> genericParameters)
 		{
-			// TODO
-			return Enumerable.Empty<Constraint>();
+			foreach (var gp in genericParameters) {
+				Constraint c = new Constraint();
+				c.TypeParameter = CleanName(gp.Name);
+				// class/struct must be first
+				if (gp.HasReferenceTypeConstraint)
+					c.BaseTypes.Add(new PrimitiveType("class"));
+				if (gp.HasNotNullableValueTypeConstraint)
+					c.BaseTypes.Add(new PrimitiveType("struct"));
+				
+				foreach (var constraintType in gp.Constraints) {
+					if (gp.HasNotNullableValueTypeConstraint && constraintType.FullName == "System.ValueType")
+						continue;
+					c.BaseTypes.Add(ConvertType(constraintType));
+				}
+				
+				if (gp.HasDefaultConstructorConstraint && !gp.HasNotNullableValueTypeConstraint)
+					c.BaseTypes.Add(new PrimitiveType("new")); // new() must be last
+				if (c.BaseTypes.Any())
+					yield return c;
+			}
 		}
 		
 		ConstructorDeclaration CreateConstructor(MethodDefinition methodDef)
@@ -545,18 +601,18 @@ namespace Decompiler
 				astProp.Getter = new Accessor {
 					Body = AstMethodBodyBuilder.CreateMethodBody(propDef.GetMethod, context)
 				}.WithAnnotation(propDef.GetMethod);
-				ConvertCustomAtributes(astProp.Getter, propDef.GetMethod);
-				ConvertCustomAtributes(astProp.Getter, propDef.GetMethod.MethodReturnType, AttributeTarget.Return);
+				ConvertCustomAttributes(astProp.Getter, propDef.GetMethod);
+				ConvertCustomAttributes(astProp.Getter, propDef.GetMethod.MethodReturnType, AttributeTarget.Return);
 			}
 			if (propDef.SetMethod != null) {
 				astProp.Setter = new Accessor {
 					Body = AstMethodBodyBuilder.CreateMethodBody(propDef.SetMethod, context)
 				}.WithAnnotation(propDef.SetMethod);
-				ConvertCustomAtributes(astProp.Setter, propDef.SetMethod);
-				ConvertCustomAtributes(astProp.Setter, propDef.SetMethod.MethodReturnType, AttributeTarget.Return);
-				ConvertCustomAtributes(astProp.Setter, propDef.SetMethod.Parameters.Last(), AttributeTarget.Param);
+				ConvertCustomAttributes(astProp.Setter, propDef.SetMethod);
+				ConvertCustomAttributes(astProp.Setter, propDef.SetMethod.MethodReturnType, AttributeTarget.Return);
+				ConvertCustomAttributes(astProp.Setter, propDef.SetMethod.Parameters.Last(), AttributeTarget.Param);
 			}
-			ConvertCustomAtributes(astProp, propDef);
+			ConvertCustomAttributes(astProp, propDef);
 			return astProp;
 		}
 
@@ -594,7 +650,7 @@ namespace Decompiler
 				else
 					initializer.Initializer = new PrimitiveExpression(fieldDef.Constant);
 			}
-			ConvertCustomAtributes(astField, fieldDef);
+			ConvertCustomAttributes(astField, fieldDef);
 			return astField;
 		}
 		
@@ -610,50 +666,65 @@ namespace Decompiler
 				}
 				// TODO: params, this
 				
-				ConvertCustomAtributes(astParam, paramDef);
+				ConvertCustomAttributes(astParam, paramDef);
 				yield return astParam;
 			}
 		}
 
-		static void ConvertCustomAtributes(AttributedNode attributedNode, ICustomAttributeProvider customAttributeProvider, AttributeTarget target = AttributeTarget.None)
+		static void ConvertCustomAttributes(AstNode attributedNode, ICustomAttributeProvider customAttributeProvider, AttributeTarget target = AttributeTarget.None)
 		{
-			if (customAttributeProvider.HasCustomAttributes)
-			{
-				var section = new AttributeSection();
-				section.AttributeTarget = target;
-				foreach (var customAttribute in customAttributeProvider.CustomAttributes)
-				{
-					ICSharpCode.NRefactory.CSharp.Attribute attribute = new ICSharpCode.NRefactory.CSharp.Attribute();
+			if (customAttributeProvider.HasCustomAttributes) {
+				var attributes = new List<ICSharpCode.NRefactory.CSharp.Attribute>();
+				foreach (var customAttribute in customAttributeProvider.CustomAttributes) {
+					var attribute = new ICSharpCode.NRefactory.CSharp.Attribute();
 					attribute.Type = ConvertType(customAttribute.AttributeType);
-					section.Attributes.Add(attribute);
+					attributes.Add(attribute);
+					
+					SimpleType st = attribute.Type as SimpleType;
+					if (st != null && st.Identifier.EndsWith("Attribute", StringComparison.Ordinal)) {
+						st.Identifier = st.Identifier.Substring(0, st.Identifier.Length - "Attribute".Length);
+					}
 
-					if(customAttribute.HasConstructorArguments)
-						foreach (var parameter in customAttribute.ConstructorArguments)
-						{
+					if(customAttribute.HasConstructorArguments) {
+						foreach (var parameter in customAttribute.ConstructorArguments) {
 							Expression parameterValue = ConvertArgumentValue(parameter);
 							attribute.Arguments.Add(parameterValue);
 						}
-
-					if (customAttribute.HasProperties)
-						foreach (var propertyNamedArg in customAttribute.Properties)
-						{
+					}
+					if (customAttribute.HasProperties) {
+						foreach (var propertyNamedArg in customAttribute.Properties) {
 							var propertyReference = customAttribute.AttributeType.Resolve().Properties.First(pr => pr.Name == propertyNamedArg.Name);
 							var propertyName = new IdentifierExpression(propertyNamedArg.Name).WithAnnotation(propertyReference);
 							var argumentValue = ConvertArgumentValue(propertyNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(propertyName, argumentValue));
 						}
+					}
 
-					if (customAttribute.HasFields)
-						foreach (var fieldNamedArg in customAttribute.Fields)
-						{
+					if (customAttribute.HasFields) {
+						foreach (var fieldNamedArg in customAttribute.Fields) {
 							var fieldReference = customAttribute.AttributeType.Resolve().Fields.First(f => f.Name == fieldNamedArg.Name);
 							var fieldName = new IdentifierExpression(fieldNamedArg.Name).WithAnnotation(fieldReference);
 							var argumentValue = ConvertArgumentValue(fieldNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(fieldName, argumentValue));
 						}
+					}
 				}
 
-				attributedNode.Attributes.Add(section);
+				if (target == AttributeTarget.Module || target == AttributeTarget.Assembly) {
+					// use separate section for each attribute
+					foreach (var attribute in attributes) {
+						var section = new AttributeSection();
+						section.AttributeTarget = target;
+						section.Attributes.Add(attribute);
+						attributedNode.AddChild(section, AttributedNode.AttributeRole);
+					}
+				} else {
+					// use single section for all attributes
+					var section = new AttributeSection();
+					section.AttributeTarget = target;
+					section.Attributes.AddRange(attributes);
+					attributedNode.AddChild(section, AttributedNode.AttributeRole);
+				}
 			}
 		}
 

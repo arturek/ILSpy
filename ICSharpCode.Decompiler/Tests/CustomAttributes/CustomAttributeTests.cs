@@ -2,16 +2,17 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using MbUnit.Framework;
+using NUnit.Framework;
 
 namespace ICSharpCode.Decompiler.Tests.CustomAttributes
 {
+	[TestFixture]
 	public class CustomAttributeTests : DecompilerTestBase
 	{
-		[StaticTestFactory]
-		public static IEnumerable<Test> CustomAttributeSamples()
-		{			
-			return GenerateSectionTests(@"CustomAttributes\S_CustomAttributeSamples.cs");
+		[Test]
+		public void CustomAttributeSamples()
+		{
+			ValidateFileRoundtrip(@"CustomAttributes\S_CustomAttributeSamples.cs");
 		}
 
 		[Test]

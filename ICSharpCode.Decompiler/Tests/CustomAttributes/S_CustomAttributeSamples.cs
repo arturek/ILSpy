@@ -46,7 +46,7 @@ namespace AttributeWithTypeArgument
 	[AttributeUsage(AttributeTargets.All)]
 	public class MyTypeAttribute : Attribute
 	{
-		public MyTypeAttribute(Type t)
+		public MyTypeAttribute(Type t) : base()
 		{
 		}
 	}
@@ -381,7 +381,7 @@ namespace TargetPropertyIndexSetMultiParam
 	}
 	public class MyClass
 	{
-		public string this[[MyAttribute(Field = 2)]int index1, [MyAttribute(Field = 3)]int index2]
+		public string this[[MyAttribute(Field = 2)] int index1, [MyAttribute(Field = 3)] int index2]
 		{
 			get
 			{
@@ -393,5 +393,16 @@ namespace TargetPropertyIndexSetMultiParam
 				return;
 			}
 		}
+	}
+}
+//$$ ClassAttributeOnTypeParameter
+namespace ClassAttributeOnTypeParameter
+{
+	[AttributeUsage(AttributeTargets.All)]
+	public class MyAttributeAttribute : Attribute
+	{
+	}
+	public class MyClass<[MyAttribute] T>
+	{
 	}
 }

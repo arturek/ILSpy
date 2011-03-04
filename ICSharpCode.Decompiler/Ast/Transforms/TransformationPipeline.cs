@@ -74,19 +74,6 @@ namespace Decompiler.Transforms
 		}
 
 		public static IEnumerable<IAstTransform> CreateTransformationPipeline(DecompilerContext context) {
-			for (int i = 0; i < 4; i++) {
-				if (Options.ReduceAstJumps) {
-					yield return VisitorTransform.Create(new Transforms.Ast.RemoveGotos(), null);
-					yield return VisitorTransform.Create(new Transforms.Ast.RemoveDeadLabels(), null);
-				}
-				if (Options.ReduceAstLoops) {
-					yield return VisitorTransform.Create(new Transforms.Ast.RestoreLoop(), null);
-				}
-				if (Options.ReduceAstOther) {
-					yield return VisitorTransform.Create(new Transforms.Ast.RemoveEmptyElseBody(), null);
-				}
-			}
-			
 			foreach (var transform in CreatePipeline(context)) {
 				yield return transform;
 			}

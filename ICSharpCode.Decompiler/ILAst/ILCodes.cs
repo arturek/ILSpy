@@ -260,6 +260,9 @@ namespace Decompiler
 		BrLogicOr,
 		InitArray, // Array Initializer
 		TernaryOp, // ?:
+		LoopBreak,
+		LoopContinue,
+		Ldc_Decimal,
 		
 		Pattern // used for ILAst pattern nodes
 	}
