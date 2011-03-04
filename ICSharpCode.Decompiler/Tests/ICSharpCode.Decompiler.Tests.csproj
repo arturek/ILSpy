@@ -39,9 +39,11 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="nunit.framework">
+    <Reference Include="Gallio, Version=3.3.0.0, Culture=neutral, PublicKeyToken=eb9cfa67ee6ab36e, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>.\nunit.framework.dll</HintPath>
+    </Reference>
+    <Reference Include="MbUnit, Version=3.3.0.0, Culture=neutral, PublicKeyToken=eb9cfa67ee6ab36e, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core">
@@ -59,10 +61,10 @@
     <Compile Include="Helpers\RemoveRedundantBaseConstructorInitializers.cs" />
     <Compile Include="Types\EnumTests.cs" />
     <Compile Include="Types\TypeTests.cs" />
-    <Compile Include="DelegateConstruction.cs" />
+    <None Include="Types\S_DelegateConstruction.cs" />
     <None Include="CustomAttributes\S_CustomAttributes.cs" />
-    <Compile Include="Loops.cs" />
-    <Compile Include="PropertiesAndEvents.cs" />
+    <None Include="Loops.cs" />
+    <None Include="Types\S_PropertiesAndEvents.cs" />
     <None Include="CustomAttributes\S_CustomAttributeSamples.cs" />
     <Compile Include="CodeSampleFileParser.cs" />
     <Compile Include="CustomAttributes\CustomAttributeTests.cs" />
@@ -72,7 +74,7 @@
     <Compile Include="Generics.cs" />
     <Compile Include="MultidimensionalArray.cs" />
     <Compile Include="TestRunner.cs" />
-    <Compile Include="ValueTypes.cs" />
+    <None Include="Types\S_ValueTypes.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Mono.Cecil\Mono.Cecil.csproj">
