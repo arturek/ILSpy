@@ -59,7 +59,7 @@ namespace ICSharpCode.Decompiler.Tests
 
 			var pipeline =
 				decompiler.CreateStandardCodeTransformationPipeline()
-				.Concat(new IAstTransform[] { new Helpers.RemoveCompilerAttribute(), new Helpers.RemoveRedundantBaseConstructorInitializers() });
+				.Concat(new IAstTransform[] { new Helpers.RemoveCompilerAttribute()});
 
 			StringWriter output = new StringWriter();
 			decompiler.TransformAndGenerateCode(new PlainTextOutput(output), pipeline);
