@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Decompiler;
-using Decompiler.Transforms;
-using MbUnit.Framework;
+
+using ICSharpCode.Decompiler.Ast;
 using Microsoft.CSharp;
 using Mono.Cecil;
+using MbUnit.Framework;
 
 namespace ICSharpCode.Decompiler.Tests
 {
