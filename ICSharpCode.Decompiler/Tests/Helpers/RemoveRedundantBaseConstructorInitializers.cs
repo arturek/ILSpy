@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Decompiler.Transforms;
+using ICSharpCode.Decompiler.Ast.Transforms;
 using ICSharpCode.NRefactory.CSharp;
 
 namespace ICSharpCode.Decompiler.Tests.Helpers
