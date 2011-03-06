@@ -111,12 +111,7 @@
       <Name>ICSharpCode.NRefactory</Name>
     </ProjectReference>
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Ast" />
-    <Folder Include="Ast\Transforms" />
-    <Folder Include="Disassembler" />
-    <Folder Include="ILAst" />
-  </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
   <Target Name="BeforeBuild">
     <MSBuild Projects="$(MSBuildProjectDirectory)\..\BuildTools\UpdateAssemblyInfo\UpdateAssemblyInfo.csproj" Targets="Build" Properties="Configuration=Debug" />
