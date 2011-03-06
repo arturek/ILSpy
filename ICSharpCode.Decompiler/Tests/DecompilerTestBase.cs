@@ -23,7 +23,10 @@ namespace ICSharpCode.Decompiler.Tests
 					continue;
 
 				var testedSectionName = sectionName;
-				yield return new TestCase(testedSectionName, () =>
+				var fileName = Path.GetFileNameWithoutExtension(samplesFileName);
+				if (fileName.StartsWith("S_", StringComparison.OrdinalIgnoreCase))
+					fileName = fileName.Substring(2);
+				yield return new TestCase(fileName + "_" + testedSectionName, () =>
 				{
 					var testCode = CodeSampleFileParser.GetSection(testedSectionName, code);
 					System.Diagnostics.Debug.WriteLine(testCode);
