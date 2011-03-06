@@ -25,5 +25,11 @@ namespace ICSharpCode.Decompiler.Tests.Types
 		{
 			ValidateFileRoundtrip(@"Types\S_DelegateConstruction.cs");
 		}
+
+		[StaticTestFactory]
+		public static IEnumerable<Test> TypeMemberDeclarationsSamples()
+		{
+			return GenerateSectionTests(@"Types\S_TypeMemberDeclarations.cs");
+		}
 	}
 }

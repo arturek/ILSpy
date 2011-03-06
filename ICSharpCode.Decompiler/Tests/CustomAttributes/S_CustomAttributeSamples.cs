@@ -357,8 +357,62 @@ namespace TargetPropertySetReturn
 		}
 	}
 }
-//$$ TargetPropertyIndexSetParam
-namespace TargetPropertyIndexSetParam
+//$$ TargetPropertyIndexGetReturn
+namespace TargetPropertyIndexGetReturn
+{
+	[AttributeUsage(AttributeTargets.All)]
+	public class MyAttributeAttribute : Attribute
+	{
+	}
+	public class MyClass
+	{
+		public int this[string s]
+		{
+			[return: MyAttribute]
+			get
+			{
+				return 3;
+			}
+		}
+	}
+}
+//$$ TargetPropertyIndexParamOnlySet
+namespace TargetPropertyIndexParamOnlySet
+{
+	[AttributeUsage(AttributeTargets.All)]
+	public class MyAttributeAttribute : Attribute
+	{
+	}
+	public class MyClass
+	{
+		public int this[[MyAttribute] string s]
+		{
+			set
+			{
+			}
+		}
+	}
+}
+//$$ TargetPropertyIndexParamOnlyGet
+namespace TargetPropertyIndexParamOnlyGet
+{
+	[AttributeUsage(AttributeTargets.All)]
+	public class MyAttributeAttribute : Attribute
+	{
+	}
+	public class MyClass
+	{
+		public int this[[MyAttribute] string s]
+		{
+			get
+			{
+				return 3;
+			}
+		}
+	}
+}
+//$$ TargetPropertyIndexSetReturn
+namespace TargetPropertyIndexSetReturn
 {
 	[AttributeUsage(AttributeTargets.All)]
 	public class MyAttributeAttribute : Attribute
@@ -372,7 +426,7 @@ namespace TargetPropertyIndexSetParam
 			{
 				return "";
 			}
-			[param: MyAttribute]
+			[return: MyAttribute]
 			set
 			{
 			}
