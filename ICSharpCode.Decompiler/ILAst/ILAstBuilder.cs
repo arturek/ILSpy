@@ -201,13 +201,8 @@ namespace ICSharpCode.Decompiler.ILAst
 		MethodDefinition methodDef;
 		bool optimize;
 		
-		Dictionary<Instruction, ByteCode> instrToByteCode = new Dictionary<Instruction, ByteCode>();
-		Dictionary<ILVariable, bool> allowInline = new Dictionary<ILVariable, bool>();
-		
 		// Virtual instructions to load exception on stack
 		Dictionary<ExceptionHandler, ByteCode> ldexceptions = new Dictionary<ExceptionHandler, ILAstBuilder.ByteCode>();
-		
-		public List<ILVariable> Variables;
 		
 		public List<ILNode> Build(MethodDefinition methodDef, bool optimize)
 		{
@@ -225,6 +220,8 @@ namespace ICSharpCode.Decompiler.ILAst
 		
 		List<ByteCode> StackAnalysis(MethodDefinition methodDef)
 		{
+			Dictionary<Instruction, ByteCode> instrToByteCode = new Dictionary<Instruction, ByteCode>();
+			
 			// Create temporary structure for the stack analysis
 			List<ByteCode> body = new List<ByteCode>(methodDef.Body.Instructions.Count);
 			List<Instruction> prefixes = null;
@@ -408,9 +405,6 @@ namespace ICSharpCode.Decompiler.ILAst
 						}
 						pushedBy.StoreTo.Add(tmpVar);
 					}
-					if (byteCode.StackBefore[i].PushedBy.Length == 1) {
-						allowInline[tmpVar] = true;
-					}
 					argIdx++;
 				}
 			}
@@ -449,7 +443,6 @@ namespace ICSharpCode.Decompiler.ILAst
 		{
 			if (optimize) {
 				int varCount = methodDef.Body.Variables.Count;
-				this.Variables = new List<ILVariable>(varCount * 2);
 				
 				for(int variableIndex = 0; variableIndex < varCount; variableIndex++) {
 					// Find all stores and loads for this variable
@@ -503,13 +496,6 @@ namespace ICSharpCode.Decompiler.ILAst
 								newVars.Add(mergedVar);
 							}
 						}
-						
-						// Permit inlining
-						foreach(VariableInfo newVar in newVars) {
-							if (newVar.Stores.Count == 1 && newVar.Loads.Count == 1) {
-								allowInline[newVar.Variable] = true;
-							}
-						}
 					}
 					
 					// Set bytecode operands
@@ -521,16 +507,13 @@ namespace ICSharpCode.Decompiler.ILAst
 							load.Operand = newVar.Variable;
 						}
 					}
-					
-					// Record new variables to global list
-					this.Variables.AddRange(newVars.Select(v => v.Variable));
 				}
 			} else {
-				this.Variables = methodDef.Body.Variables.Select(v => new ILVariable() { Name = string.IsNullOrEmpty(v.Name) ?  "var_" + v.Index : v.Name, Type = v.VariableType, OriginalVariable = v }).ToList();
+				var variables = methodDef.Body.Variables.Select(v => new ILVariable() { Name = string.IsNullOrEmpty(v.Name) ?  "var_" + v.Index : v.Name, Type = v.VariableType, OriginalVariable = v }).ToList();
 				foreach(ByteCode byteCode in body) {
 					if (byteCode.Code == ILCode.Ldloc || byteCode.Code == ILCode.Stloc || byteCode.Code == ILCode.Ldloca) {
 						int index = ((VariableDefinition)byteCode.Operand).Index;
-						byteCode.Operand = this.Variables[index];
+						byteCode.Operand = variables[index];
 					}
 				}
 			}
@@ -609,9 +592,10 @@ namespace ICSharpCode.Decompiler.ILAst
 						tryCatchBlock.CatchBlocks.Add(catchBlock);
 					} else if (eh.HandlerType == ExceptionHandlerType.Finally) {
 						tryCatchBlock.FinallyBlock = new ILBlock(handlerAst);
-						// TODO: ldexception
+					} else if (eh.HandlerType == ExceptionHandlerType.Fault) {
+						tryCatchBlock.FaultBlock = new ILBlock(handlerAst);
 					} else {
-						// TODO
+						// TODO: ExceptionHandlerType.Filter
 					}
 				}
 				
@@ -666,55 +650,8 @@ namespace ICSharpCode.Decompiler.ILAst
 				} else {
 					ILVariable tmpVar = new ILVariable() { Name = "expr_" + byteCode.Offset.ToString("X2"), IsGenerated = true };
 					ast.Add(new ILExpression(ILCode.Stloc, tmpVar, expr));
-					foreach(ILVariable storeTo in byteCode.StoreTo) {
+					foreach(ILVariable storeTo in byteCode.StoreTo.AsEnumerable().Reverse()) {
 						ast.Add(new ILExpression(ILCode.Stloc, storeTo, new ILExpression(ILCode.Ldloc, tmpVar)));
-					}
-				}
-			}
-			
-			// Try to in-line stloc / ldloc pairs
-			for(int i = 0; i < ast.Count - 1; i++) {
-				if (i < 0) continue;
-				
-				ILExpression currExpr = ast[i] as ILExpression;
-				ILExpression nextExpr = ast[i + 1] as ILExpression;
-				
-				if (currExpr != null && nextExpr != null && currExpr.Code == ILCode.Stloc) {
-					
-					// If the next expression is generated stloc, look inside 
-					if (nextExpr.Code == ILCode.Stloc && ((ILVariable)nextExpr.Operand).IsGenerated) {
-						nextExpr = nextExpr.Arguments[0];
-					}
-					
-					// Find the use of the 'expr'
-					for(int j = 0; j < nextExpr.Arguments.Count; j++) {
-						ILExpression arg = nextExpr.Arguments[j];
-						
-						// We are moving the expression evaluation past the other aguments.
-						// It is ok to pass ldloc because the expression can not contain stloc and thus the ldcoc will still return the same value
-						// Do not inline ldloca
-						if (arg.Code == ILCode.Ldloc) {
-							if (arg.Operand == currExpr.Operand) {
-								bool canInline;
-								allowInline.TryGetValue((ILVariable)arg.Operand, out canInline);
-								
-								if (canInline) {
-									// Assigne the ranges for optimized away instrustions somewhere
-									currExpr.Arguments[0].ILRanges.AddRange(currExpr.ILRanges);
-									currExpr.Arguments[0].ILRanges.AddRange(nextExpr.Arguments[j].ILRanges);
-									
-									// Remove from global list, if present
-									this.Variables.Remove((ILVariable)arg.Operand);
-									
-									ast.RemoveAt(i);
-									nextExpr.Arguments[j] = currExpr.Arguments[0]; // Inline the stloc body
-									i -= 2; // Try the same index again
-									break;  // Found
-								}
-							}
-						} else {
-							break;  // Side-effects
-						}
 					}
 				}
 			}

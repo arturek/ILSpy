@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -150,6 +151,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		public ILBlock          TryBlock;
 		public List<CatchBlock> CatchBlocks;
 		public ILBlock          FinallyBlock;
+		public ILBlock          FaultBlock;
 		
 		public override IEnumerable<ILNode> GetChildren()
 		{
@@ -158,6 +160,8 @@ namespace ICSharpCode.Decompiler.ILAst
 			foreach (var catchBlock in this.CatchBlocks) {
 				yield return catchBlock;
 			}
+			if (this.FaultBlock != null)
+				yield return this.FaultBlock;
 			if (this.FinallyBlock != null)
 				yield return this.FinallyBlock;
 		}
@@ -171,6 +175,13 @@ namespace ICSharpCode.Decompiler.ILAst
 			output.WriteLine("}");
 			foreach (CatchBlock block in CatchBlocks) {
 				block.WriteTo(output);
+			}
+			if (FaultBlock != null) {
+				output.WriteLine("fault {");
+				output.Indent();
+				FaultBlock.WriteTo(output);
+				output.Unindent();
+				output.WriteLine("}");
 			}
 			if (FinallyBlock != null) {
 				output.WriteLine("finally {");
@@ -219,6 +230,14 @@ namespace ICSharpCode.Decompiler.ILAst
 		public TypeReference InferredType { get; set; }
 		
 		public static readonly object AnyOperand = new object();
+		
+		public ILExpression(ILCode code, object operand, List<ILExpression> args)
+		{
+			this.Code = code;
+			this.Operand = operand;
+			this.Arguments = new List<ILExpression>(args);
+			this.ILRanges  = new List<ILRange>(1);
+		}
 		
 		public ILExpression(ILCode code, object operand, params ILExpression[] args)
 		{
@@ -345,6 +364,13 @@ namespace ICSharpCode.Decompiler.ILAst
 			if (Operand != null) {
 				if (Operand is ILLabel) {
 					output.WriteReference(((ILLabel)Operand).Name, Operand);
+				} else if (Operand is ILLabel[]) {
+					ILLabel[] labels = (ILLabel[])Operand;
+					for (int i = 0; i < labels.Length; i++) {
+						if (i > 0)
+							output.Write(", ");
+						output.WriteReference(labels[i].Name, labels[i]);
+					}
 				} else if (Operand is MethodReference) {
 					MethodReference method = (MethodReference)Operand;
 					method.DeclaringType.WriteTo(output, true, true);
@@ -433,9 +459,24 @@ namespace ICSharpCode.Decompiler.ILAst
 	
 	public class ILSwitch: ILNode
 	{
+		public class CaseBlock: ILBlock
+		{
+			public List<int> Values;  // null for the default case
+			
+			public override void WriteTo(ITextOutput output)
+			{
+				Debug.Assert(Values.Count > 0);
+				foreach (int i in this.Values) {
+					output.WriteLine("case {0}:", i);
+				}
+				output.Indent();
+				base.WriteTo(output);
+				output.Unindent();
+			}
+		}
+		
 		public ILExpression Condition;
-		public List<ILBlock> CaseBlocks = new List<ILBlock>();
-		public ILExpression DefaultGoto;
+		public List<CaseBlock> CaseBlocks = new List<CaseBlock>();
 		
 		public override IEnumerable<ILNode> GetChildren()
 		{
@@ -444,8 +485,6 @@ namespace ICSharpCode.Decompiler.ILAst
 			foreach (ILBlock caseBlock in this.CaseBlocks) {
 				yield return caseBlock;
 			}
-			if (this.DefaultGoto != null)
-				yield return this.DefaultGoto;
 		}
 		
 		public override void WriteTo(ITextOutput output)
@@ -454,11 +493,8 @@ namespace ICSharpCode.Decompiler.ILAst
 			Condition.WriteTo(output);
 			output.WriteLine(") {");
 			output.Indent();
-			for (int i = 0; i < CaseBlocks.Count; i++) {
-				output.WriteLine("case {0}:", i);
-				output.Indent();
-				CaseBlocks[i].WriteTo(output);
-				output.Unindent();
+			foreach (CaseBlock caseBlock in this.CaseBlocks) {
+				caseBlock.WriteTo(output);
 			}
 			output.Unindent();
 			output.WriteLine("}");

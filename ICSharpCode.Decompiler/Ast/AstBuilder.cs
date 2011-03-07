@@ -33,19 +33,27 @@ namespace ICSharpCode.Decompiler.Ast
 			this.context = context;
 		}
 		
-		public static bool MemberIsHidden(MemberReference member)
+		public static bool MemberIsHidden(MemberReference member, DecompilerSettings settings)
 		{
 			MethodDefinition method = member as MethodDefinition;
-			if (method != null && (method.IsGetter || method.IsSetter || method.IsAddOn || method.IsRemoveOn))
-				return true;
-			if (method != null && method.Name.StartsWith("<", StringComparison.Ordinal) && method.IsCompilerGenerated())
-				return true;
+			if (method != null) {
+				if (method.IsGetter || method.IsSetter || method.IsAddOn || method.IsRemoveOn)
+					return true;
+				if (settings.AnonymousMethods && method.Name.StartsWith("<", StringComparison.Ordinal) && method.IsCompilerGenerated())
+					return true;
+			}
 			TypeDefinition type = member as TypeDefinition;
-			if (type != null && type.DeclaringType != null && type.Name.StartsWith("<>c__DisplayClass", StringComparison.Ordinal) && type.IsCompilerGenerated())
-				return true;
+			if (type != null && type.DeclaringType != null) {
+				if (settings.AnonymousMethods && type.Name.StartsWith("<>c__DisplayClass", StringComparison.Ordinal) && type.IsCompilerGenerated())
+					return true;
+				if (settings.YieldReturn && YieldReturnDecompiler.IsCompilerGeneratorEnumerator(type))
+					return true;
+			}
 			FieldDefinition field = member as FieldDefinition;
-			if (field != null && field.Name.StartsWith("CS$<>", StringComparison.Ordinal) && field.IsCompilerGenerated())
-				return true;
+			if (field != null) {
+				if (settings.AnonymousMethods && field.Name.StartsWith("CS$<>", StringComparison.Ordinal) && field.IsCompilerGenerated())
+					return true;
+			}
 			return false;
 		}
 		
@@ -153,6 +161,8 @@ namespace ICSharpCode.Decompiler.Ast
 		
 		public TypeDeclaration CreateType(TypeDefinition typeDef)
 		{
+			TypeDefinition oldCurrentType = context.CurrentType;
+			context.CurrentType = typeDef;
 			TypeDeclaration astType = new TypeDeclaration();
 			ConvertAttributes(astType, typeDef);
 			astType.AddAnnotation(typeDef);
@@ -180,7 +190,7 @@ namespace ICSharpCode.Decompiler.Ast
 			
 			// Nested types
 			foreach(TypeDefinition nestedTypeDef in typeDef.NestedTypes) {
-				if (MemberIsHidden(nestedTypeDef))
+				if (MemberIsHidden(nestedTypeDef, context.Settings))
 					continue;
 				astType.AddChild(CreateType(nestedTypeDef), TypeDeclaration.MemberRole);
 			}
@@ -218,6 +228,7 @@ namespace ICSharpCode.Decompiler.Ast
 				AddTypeMembers(astType, typeDef);
 			}
 
+			context.CurrentType = oldCurrentType;
 			return astType;
 		}
 
@@ -499,7 +510,7 @@ namespace ICSharpCode.Decompiler.Ast
 		{
 			// Add fields
 			foreach(FieldDefinition fieldDef in typeDef.Fields) {
-				if (MemberIsHidden(fieldDef)) continue;
+				if (MemberIsHidden(fieldDef, context.Settings)) continue;
 				astType.AddChild(CreateField(fieldDef), TypeDeclaration.MemberRole);
 			}
 			
@@ -520,7 +531,7 @@ namespace ICSharpCode.Decompiler.Ast
 			
 			// Add methods
 			foreach(MethodDefinition methodDef in typeDef.Methods) {
-				if (methodDef.IsConstructor || MemberIsHidden(methodDef)) continue;
+				if (methodDef.IsConstructor || MemberIsHidden(methodDef, context.Settings)) continue;
 				
 				astType.AddChild(CreateMethod(methodDef), TypeDeclaration.MemberRole);
 			}
@@ -1004,23 +1015,15 @@ namespace ICSharpCode.Decompiler.Ast
 		private static Expression ConvertArgumentValue(CustomAttributeArgument parameter)
 		{
 			var type = parameter.Type.Resolve();
-			Expression parameterValue;
-			if (type.IsEnum)
-			{
-				parameterValue = MakePrimitive(Convert.ToInt64(parameter.Value), type);
-			}
-			else if (parameter.Value is TypeReference)
-			{
-				parameterValue = new TypeOfExpression()
-				{
+			if (type != null && type.IsEnum) {
+				return MakePrimitive(Convert.ToInt64(parameter.Value), type);
+			} else if (parameter.Value is TypeReference) {
+				return new TypeOfExpression() {
 					Type = ConvertType((TypeReference)parameter.Value),
 				};
+			} else {
+				return new PrimitiveExpression(parameter.Value);
 			}
-			else
-			{
-				parameterValue = new PrimitiveExpression(parameter.Value);
-			}
-			return parameterValue;
 		}
 		#endregion
 
