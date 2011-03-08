@@ -49,7 +49,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 			return new IAstTransform[] {
 				new PushNegation(),
 				new DelegateConstruction(context),
-				new PatternStatementTransform(),
+				new PatternStatementTransform(context),
 				new ConvertConstructorCallIntoInitializer(),
 				new ReplaceMethodCallsWithOperators(),
 			};
