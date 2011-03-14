@@ -60,7 +60,7 @@ namespace ICSharpCode.ILSpy
 				new ILAstOptimizer().Optimize(context, ilMethod, abortBeforeStep.Value);
 			}
 			
-			var allVariables = ilMethod.GetSelfAndChildrenRecursive<ILExpression>().Select(e => e.Operand as ILVariable).Where(v => v != null).Distinct();
+			var allVariables = ilMethod.GetSelfAndChildrenRecursive<ILExpression>(e => e.Operand is ILVariable).Select(e => (ILVariable)e.Operand).Distinct();
 			foreach (ILVariable v in allVariables) {
 				output.WriteDefinition(v.Name, v);
 				if (v.Type != null) {
@@ -80,7 +80,7 @@ namespace ICSharpCode.ILSpy
 		internal static IEnumerable<ILAstLanguage> GetDebugLanguages()
 		{
 			yield return new ILAstLanguage { name = "ILAst (unoptimized)", inlineVariables = false };
-			string nextName = "ILAst (variable inlining)";
+			string nextName = "ILAst (variable splitting)";
 			foreach (ILAstOptimizationStep step in Enum.GetValues(typeof(ILAstOptimizationStep))) {
 				yield return new ILAstLanguage { name = nextName, abortBeforeStep = step };
 				nextName = "ILAst (after " + step + ")";

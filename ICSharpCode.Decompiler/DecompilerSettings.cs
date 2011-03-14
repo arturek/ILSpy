@@ -56,6 +56,21 @@ namespace ICSharpCode.Decompiler
 			}
 		}
 		
+		bool automaticEvents = true;
+		
+		/// <summary>
+		/// Decompile automatic events
+		/// </summary>
+		public bool AutomaticEvents {
+			get { return automaticEvents; }
+			set {
+				if (automaticEvents != value) {
+					automaticEvents = value;
+					OnPropertyChanged("AutomaticEvents");
+				}
+			}
+		}
+		
 		bool usingStatement = true;
 		
 		/// <summary>
@@ -82,6 +97,33 @@ namespace ICSharpCode.Decompiler
 				if (forEachStatement != value) {
 					forEachStatement = value;
 					OnPropertyChanged("ForEachStatement");
+				}
+			}
+		}
+		
+		bool lockStatement = true;
+		
+		/// <summary>
+		/// Decompile lock statements.
+		/// </summary>
+		public bool LockStatement {
+			get { return lockStatement; }
+			set {
+				if (lockStatement != value) {
+					lockStatement = value;
+					OnPropertyChanged("LockStatement");
+				}
+			}
+		}
+		
+		bool switchStatementOnString = true;
+		
+		public bool SwitchStatementOnString {
+			get { return switchStatementOnString; }
+			set {
+				if (switchStatementOnString != value) {
+					switchStatementOnString = value;
+					OnPropertyChanged("SwitchStatementOnString");
 				}
 			}
 		}

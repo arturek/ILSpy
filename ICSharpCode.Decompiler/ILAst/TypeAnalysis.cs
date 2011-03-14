@@ -28,6 +28,10 @@ namespace ICSharpCode.Decompiler.ILAst
 			ta.method = method;
 			ta.InferTypes(method);
 			ta.InferRemainingStores();
+			// Now that stores were inferred, we can infer the remaining instructions that depended on those stored
+			// (but which didn't provide an expected type for the store)
+			// For example, this is necessary to make a switch() over a generated variable work correctly.
+			ta.InferTypes(method);
 		}
 		
 		DecompilerContext context;
@@ -134,6 +138,11 @@ namespace ICSharpCode.Decompiler.ILAst
 						InferTypeForExpression(expr.Arguments[1], expectedType, forceInferChildren),
 						InferTypeForExpression(expr.Arguments[2], expectedType, forceInferChildren)
 					);
+				case ILCode.NullCoalescing:
+					return TypeWithMoreInformation(
+						InferTypeForExpression(expr.Arguments[0], expectedType, forceInferChildren),
+						InferTypeForExpression(expr.Arguments[1], expectedType, forceInferChildren)
+					);
 					#endregion
 					#region Variable load/store
 				case ILCode.Stloc:
@@ -199,6 +208,18 @@ namespace ICSharpCode.Decompiler.ILAst
 						}
 						return ctor.DeclaringType;
 					}
+				case ILCode.InitCollection:
+					return InferTypeForExpression(expr.Arguments[0], expectedType);
+				case ILCode.InitCollectionAddMethod:
+					{
+						MethodReference addMethod = (MethodReference)expr.Operand;
+						if (forceInferChildren) {
+							for (int i = 1; i < addMethod.Parameters.Count; i++) {
+								InferTypeForExpression(expr.Arguments[i-1], SubstituteTypeArgs(addMethod.Parameters[i].ParameterType, addMethod));
+							}
+						}
+						return addMethod.DeclaringType;
+					}
 					#endregion
 					#region Load/Store Fields
 				case ILCode.Ldfld:
@@ -215,11 +236,11 @@ namespace ICSharpCode.Decompiler.ILAst
 						InferTypeForExpression(expr.Arguments[0], ((FieldReference)expr.Operand).DeclaringType);
 						InferTypeForExpression(expr.Arguments[1], GetFieldType((FieldReference)expr.Operand));
 					}
-					return null;
+					return GetFieldType((FieldReference)expr.Operand);
 				case ILCode.Stsfld:
 					if (forceInferChildren)
 						InferTypeForExpression(expr.Arguments[0], GetFieldType((FieldReference)expr.Operand));
-					return null;
+					return GetFieldType((FieldReference)expr.Operand);
 					#endregion
 					#region Reference/Pointer instructions
 				case ILCode.Ldind_I:
@@ -256,8 +277,18 @@ namespace ICSharpCode.Decompiler.ILAst
 					return null;
 				case ILCode.Initobj:
 					return null;
+				case ILCode.DefaultValue:
+					return (TypeReference)expr.Operand;
 				case ILCode.Localloc:
-					return typeSystem.IntPtr;
+					if (forceInferChildren) {
+						InferTypeForExpression(expr.Arguments[0], typeSystem.Int32);
+					}
+					if (expectedType is PointerType)
+						return expectedType;
+					else
+						return typeSystem.IntPtr;
+				case ILCode.Sizeof:
+					return typeSystem.Int32;
 					#endregion
 					#region Arithmetic instructions
 				case ILCode.Not: // bitwise complement
@@ -343,12 +374,13 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.Ldelem_I2:
 				case ILCode.Ldelem_I4:
 				case ILCode.Ldelem_I8:
+				case ILCode.Ldelem_R4:
+				case ILCode.Ldelem_R8:
 				case ILCode.Ldelem_I:
 				case ILCode.Ldelem_Ref:
 					{
 						ArrayType arrayType = InferTypeForExpression(expr.Arguments[0], null) as ArrayType;
 						if (forceInferChildren) {
-							InferTypeForExpression(expr.Arguments[0], new ArrayType(typeSystem.Byte));
 							InferTypeForExpression(expr.Arguments[1], typeSystem.Int32);
 						}
 						return arrayType != null ? arrayType.ElementType : null;
@@ -386,33 +418,43 @@ namespace ICSharpCode.Decompiler.ILAst
 					#region Conversion instructions
 				case ILCode.Conv_I1:
 				case ILCode.Conv_Ovf_I1:
+				case ILCode.Conv_Ovf_I1_Un:
 					return (GetInformationAmount(expectedType) == 8 && IsSigned(expectedType) == true) ? expectedType : typeSystem.SByte;
 				case ILCode.Conv_I2:
 				case ILCode.Conv_Ovf_I2:
+				case ILCode.Conv_Ovf_I2_Un:
 					return (GetInformationAmount(expectedType) == 16 && IsSigned(expectedType) == true) ? expectedType : typeSystem.Int16;
 				case ILCode.Conv_I4:
 				case ILCode.Conv_Ovf_I4:
+				case ILCode.Conv_Ovf_I4_Un:
 					return (GetInformationAmount(expectedType) == 32 && IsSigned(expectedType) == true) ? expectedType : typeSystem.Int32;
 				case ILCode.Conv_I8:
 				case ILCode.Conv_Ovf_I8:
+				case ILCode.Conv_Ovf_I8_Un:
 					return (GetInformationAmount(expectedType) == 64 && IsSigned(expectedType) == true) ? expectedType : typeSystem.Int64;
 				case ILCode.Conv_U1:
 				case ILCode.Conv_Ovf_U1:
+				case ILCode.Conv_Ovf_U1_Un:
 					return (GetInformationAmount(expectedType) == 8 && IsSigned(expectedType) == false) ? expectedType : typeSystem.Byte;
 				case ILCode.Conv_U2:
 				case ILCode.Conv_Ovf_U2:
+				case ILCode.Conv_Ovf_U2_Un:
 					return (GetInformationAmount(expectedType) == 16 && IsSigned(expectedType) == false) ? expectedType : typeSystem.UInt16;
 				case ILCode.Conv_U4:
 				case ILCode.Conv_Ovf_U4:
+				case ILCode.Conv_Ovf_U4_Un:
 					return (GetInformationAmount(expectedType) == 32 && IsSigned(expectedType) == false) ? expectedType : typeSystem.UInt32;
 				case ILCode.Conv_U8:
 				case ILCode.Conv_Ovf_U8:
+				case ILCode.Conv_Ovf_U8_Un:
 					return (GetInformationAmount(expectedType) == 64 && IsSigned(expectedType) == false) ? expectedType : typeSystem.UInt64;
 				case ILCode.Conv_I:
 				case ILCode.Conv_Ovf_I:
+				case ILCode.Conv_Ovf_I_Un:
 					return (GetInformationAmount(expectedType) == nativeInt && IsSigned(expectedType) == true) ? expectedType : typeSystem.IntPtr;
 				case ILCode.Conv_U:
 				case ILCode.Conv_Ovf_U:
+				case ILCode.Conv_Ovf_U_Un:
 					return (GetInformationAmount(expectedType) == nativeInt && IsSigned(expectedType) == false) ? expectedType : typeSystem.UIntPtr;
 				case ILCode.Conv_R4:
 					return typeSystem.Single;
@@ -458,10 +500,21 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.Rethrow:
 				case ILCode.LoopOrSwitchBreak:
 				case ILCode.LoopContinue:
+				case ILCode.YieldBreak:
 					return null;
 				case ILCode.Ret:
 					if (forceInferChildren && expr.Arguments.Count == 1)
 						InferTypeForExpression(expr.Arguments[0], context.CurrentMethod.ReturnType);
+					return null;
+				case ILCode.YieldReturn:
+					if (forceInferChildren) {
+						GenericInstanceType genericType = context.CurrentMethod.ReturnType as GenericInstanceType;
+						if (genericType != null) { // IEnumerable<T> or IEnumerator<T>
+							InferTypeForExpression(expr.Arguments[0], genericType.GenericArguments[0]);
+						} else { // non-generic IEnumerable or IEnumerator
+							InferTypeForExpression(expr.Arguments[0], typeSystem.Object);
+						}
+					}
 					return null;
 					#endregion
 				case ILCode.Pop:

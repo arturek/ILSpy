@@ -258,13 +258,17 @@ namespace ICSharpCode.Decompiler.ILAst
 		LogicNot,
 		LogicAnd,
 		LogicOr,
+		NullCoalescing,
 		InitArray, // Array Initializer
+		InitCollection, // Collection Initializer: first arg is newobj, remaining args are InitCollectionAddMethod method calls
+		InitCollectionAddMethod,
 		TernaryOp, // ?:
 		LoopOrSwitchBreak,
 		LoopContinue,
 		Ldc_Decimal,
 		YieldBreak,
 		YieldReturn,
+		DefaultValue, // default(T)
 		
 		Pattern // used for ILAst pattern nodes
 	}

@@ -6,6 +6,7 @@ using MbUnit.Framework;
 
 namespace ICSharpCode.Decompiler.Tests.Types
 {
+	[TestFixture]
 	public class TypeTests : DecompilerTestBase
 	{
 		[Test]
