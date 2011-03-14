@@ -53,15 +53,33 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		public string Name {
 			get { return type.Name; }
 		}
-		
+
 		public string Namespace {
 			get { return type.Namespace; }
 		}
 		
 		public override object Text {
-			get { return HighlightSearchMatch(type.Name); }
+			get { return HighlightSearchMatch(FormattedTypeName()); }
 		}
-		
+
+		private string FormattedTypeName()
+		{
+			var extensionIndex = type.Name.IndexOf("`");
+			if (extensionIndex >= 0) {
+				var builder = new System.Text.StringBuilder();
+				builder.Append(type.Name.Substring(0, extensionIndex));
+				builder.Append('<');
+				for (int index = 0; index < type.GenericParameters.Count; index++) {
+					if (index > 0)
+						builder.Append(", ");
+					builder.Append(type.GenericParameters[index].Name);
+				}
+				builder.Append('>');
+				return builder.ToString();
+			} else
+				return type.Name;
+		}
+
 		public bool IsPublicAPI {
 			get {
 				switch (type.Attributes & TypeAttributes.VisibilityMask) {
