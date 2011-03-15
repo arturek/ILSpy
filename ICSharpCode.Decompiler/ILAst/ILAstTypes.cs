@@ -200,6 +200,15 @@ namespace ICSharpCode.Decompiler.ILAst
 		public bool   IsGenerated;
 		public TypeReference Type;
 		public VariableDefinition OriginalVariable;
+		public ParameterDefinition OriginalParameter;
+		
+		public bool IsPinned {
+			get { return OriginalVariable != null && OriginalVariable.IsPinned; }
+		}
+		
+		public bool IsParameter {
+			get { return OriginalParameter != null; }
+		}
 		
 		public override string ToString()
 		{
@@ -332,6 +341,11 @@ namespace ICSharpCode.Decompiler.ILAst
 					if (this.InferredType != null) {
 						output.Write(':');
 						this.InferredType.WriteTo(output, true, true);
+						if (this.ExpectedType != null && this.ExpectedType.FullName != this.InferredType.FullName) {
+							output.Write("[exp:");
+							this.ExpectedType.WriteTo(output, true, true);
+							output.Write(']');
+						}
 					}
 					return;
 				}
@@ -498,6 +512,32 @@ namespace ICSharpCode.Decompiler.ILAst
 			foreach (CaseBlock caseBlock in this.CaseBlocks) {
 				caseBlock.WriteTo(output);
 			}
+			output.Unindent();
+			output.WriteLine("}");
+		}
+	}
+	
+	public class ILFixedStatement : ILNode
+	{
+		public ILExpression Initializer;
+		public ILBlock      BodyBlock;
+		
+		public override IEnumerable<ILNode> GetChildren()
+		{
+			if (this.Initializer != null)
+				yield return this.Initializer;
+			if (this.BodyBlock != null)
+				yield return this.BodyBlock;
+		}
+		
+		public override void WriteTo(ITextOutput output)
+		{
+			output.Write("fixed (");
+			if (this.Initializer != null)
+				this.Initializer.WriteTo(output);
+			output.WriteLine(") {");
+			output.Indent();
+			this.BodyBlock.WriteTo(output);
 			output.Unindent();
 			output.WriteLine("}");
 		}

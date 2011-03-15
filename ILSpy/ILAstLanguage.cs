@@ -60,11 +60,14 @@ namespace ICSharpCode.ILSpy
 				new ILAstOptimizer().Optimize(context, ilMethod, abortBeforeStep.Value);
 			}
 			
-			var allVariables = ilMethod.GetSelfAndChildrenRecursive<ILExpression>(e => e.Operand is ILVariable).Select(e => (ILVariable)e.Operand).Distinct();
+			var allVariables = ilMethod.GetSelfAndChildrenRecursive<ILExpression>().Select(e => e.Operand as ILVariable)
+				.Where(v => v != null && !v.IsParameter).Distinct();
 			foreach (ILVariable v in allVariables) {
 				output.WriteDefinition(v.Name, v);
 				if (v.Type != null) {
 					output.Write(" : ");
+					if (v.IsPinned)
+						output.Write("pinned ");
 					v.Type.WriteTo(output, true, true);
 				}
 				output.WriteLine();

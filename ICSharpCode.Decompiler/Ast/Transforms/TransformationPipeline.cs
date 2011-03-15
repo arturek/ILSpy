@@ -52,6 +52,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 				new PatternStatementTransform(context),
 				new ConvertConstructorCallIntoInitializer(),
 				new ReplaceMethodCallsWithOperators(),
+				new IntroduceUnsafeModifier(),
 			};
 		}
 
