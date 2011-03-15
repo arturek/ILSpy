@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -163,6 +164,43 @@ namespace ICSharpCode.ILSpy.TreeNodes
 				foreach (ILSpyTreeNode node in this.Children.OfType<ILSpyTreeNode>())
 					ApplyFilterToChild(node);
 			}
+		}
+
+		protected static string FormatTypeName(Mono.Cecil.TypeReference type, bool fullName = false, Mono.Cecil.TypeReference[] typeArguments = null)
+		{
+			var extensionIndex = type.Name.IndexOf("`");
+			if (extensionIndex >= 0) {
+				var builder = new System.Text.StringBuilder();
+
+				if (fullName) {
+					if (type.IsNested)
+						builder.Append(FormatTypeName(type.DeclaringType, true));
+					else if (!String.IsNullOrEmpty(type.Namespace))
+						builder.AppendFormat("{0}.", type.Namespace);
+				}
+
+				builder.Append(type.Name.Substring(0, extensionIndex));
+				builder.Append('<');
+				var gInstance = type as Mono.Cecil.GenericInstanceType;
+				if (gInstance != null) {
+					bool firstItem = true;
+					foreach (var typeArg in (IEnumerable<Mono.Cecil.TypeReference>)typeArguments ?? gInstance.GenericArguments) {
+						if (firstItem)
+							firstItem = false;
+						else
+							builder.Append(", ");
+						builder.Append(FormatTypeName(typeArg));
+					}
+				}
+				else for (int index = 0; index < type.GenericParameters.Count; index++) {
+					if (index > 0)
+						builder.Append(", ");
+					builder.Append(type.GenericParameters[index].Name);
+				}
+				builder.Append('>');
+				return builder.ToString();
+			} else
+				return fullName ? type.FullName : type.Name;
 		}
 	}
 	
