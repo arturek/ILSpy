@@ -18,7 +18,8 @@ namespace ICSharpCode.Decompiler.ILAst
 			foreach (ILNode node in method.GetSelfAndChildrenRecursive<ILNode>()) {
 				ILNode previousChild = null;
 				foreach (ILNode child in node.GetChildren()) {
-					Debug.Assert(!parent.ContainsKey(child));
+					if (parent.ContainsKey(child))
+						throw new Exception("The following expression is linked from several locations: " + child.ToString());
 					parent[child] = node;
 					if (previousChild != null)
 						nextSibling[previousChild] = child;
@@ -64,8 +65,9 @@ namespace ICSharpCode.Decompiler.ILAst
 					
 					int count = ilCase.Body.Count;
 					if (count >= 2) {
-						if (!ilCase.Body[count - 2].CanFallThough() &&
-						    ilCase.Body[count - 1].Match(ILCode.LoopOrSwitchBreak)) {
+						if (ilCase.Body[count - 2].IsUnconditionalControlFlow() &&
+						    ilCase.Body[count - 1].Match(ILCode.LoopOrSwitchBreak)) 
+						{
 							ilCase.Body.RemoveAt(count - 1);
 						}
 					}

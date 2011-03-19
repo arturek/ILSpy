@@ -18,34 +18,44 @@ namespace ICSharpCode.Decompiler.ILAst
 		YieldReturn,
 		SplitToMovableBlocks,
 		TypeInference,
-		PeepholeOptimizations,
 		SimplifyShortCircuit,
 		SimplifyTernaryOperator,
 		SimplifyNullCoalescing,
-		MoreSimplifyPasses,
+		JoinBasicBlocks,
+		TransformDecimalCtorToConstant,
+		SimplifyLdObjAndStObj,
+		TransformArrayInitializers,
+		TransformCollectionInitializers,
+		MakeAssignmentExpression,
+		InlineVariables2,
 		FindLoops,
 		FindConditions,
 		FlattenNestedMovableBlocks,
+		RemoveRedundantCode2,
 		GotoRemoval,
 		DuplicateReturns,
-		FlattenIfStatements,
-		InlineVariables2,
-		PeepholeTransforms,
+		ReduceIfNesting,
+		InlineVariables3,
+		CachedDelegateInitialization,
+		IntroduceFixedStatements,
 		TypeInference2,
+		RemoveRedundantCode3,
 		None
 	}
 	
-	public class ILAstOptimizer
+	public partial class ILAstOptimizer
 	{
 		int nextLabelIndex = 0;
 		
 		DecompilerContext context;
 		TypeSystem typeSystem;
+		ILBlock method;
 		
 		public void Optimize(DecompilerContext context, ILBlock method, ILAstOptimizationStep abortBeforeStep = ILAstOptimizationStep.None)
 		{
 			this.context = context;
 			this.typeSystem = context.CurrentMethod.Module.TypeSystem;
+			this.method = method;
 			
 			if (abortBeforeStep == ILAstOptimizationStep.RemoveRedundantCode) return;
 			RemoveRedundantCode(method);
@@ -77,23 +87,42 @@ namespace ICSharpCode.Decompiler.ILAst
 			// Types are needed for the ternary operator optimization
 			TypeAnalysis.Run(context, method);
 			
-			if (abortBeforeStep == ILAstOptimizationStep.PeepholeOptimizations) return;
-			AnalyseLabels(method);
 			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
 				bool modified;
 				do {
 					modified = false;
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyShortCircuit) return;
-					modified |= block.RunPeepholeOptimization(TrySimplifyShortCircuit);
+					modified |= block.RunOptimization(new SimpleControlFlow(context, method).SimplifyShortCircuit);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyTernaryOperator) return;
-					modified |= block.RunPeepholeOptimization(TrySimplifyTernaryOperator);
+					modified |= block.RunOptimization(new SimpleControlFlow(context, method).SimplifyTernaryOperator);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyNullCoalescing) return;
-					modified |= block.RunPeepholeOptimization(TrySimplifyNullCoalescing);
+					modified |= block.RunOptimization(new SimpleControlFlow(context, method).SimplifyNullCoalescing);
 					
-					if (abortBeforeStep == ILAstOptimizationStep.MoreSimplifyPasses) return;
+					if (abortBeforeStep == ILAstOptimizationStep.JoinBasicBlocks) return;
+					modified |= block.RunOptimization(new SimpleControlFlow(context, method).JoinBasicBlocks);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.TransformDecimalCtorToConstant) return;
+					modified |= block.RunOptimization(TransformDecimalCtorToConstant);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.SimplifyLdObjAndStObj) return;
+					modified |= block.RunOptimization(SimplifyLdObjAndStObj);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.TransformArrayInitializers) return;
+					modified |= block.RunOptimization(Initializers.TransformArrayInitializers);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.TransformCollectionInitializers) return;
+					modified |= block.RunOptimization(Initializers.TransformCollectionInitializers);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.MakeAssignmentExpression) return;
+					modified |= block.RunOptimization(MakeAssignmentExpression);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.InlineVariables2) return;
+					modified |= new ILInlining(method).InlineAllInBlock(block);
+					new ILInlining(method).CopyPropagation();
+					
 				} while(modified);
 			}
 			
@@ -110,29 +139,52 @@ namespace ICSharpCode.Decompiler.ILAst
 			if (abortBeforeStep == ILAstOptimizationStep.FlattenNestedMovableBlocks) return;
 			FlattenBasicBlocks(method);
 			
-			if (abortBeforeStep == ILAstOptimizationStep.GotoRemoval) return;
+			if (abortBeforeStep == ILAstOptimizationStep.RemoveRedundantCode2) return;
 			RemoveRedundantCode(method);
+			
+			if (abortBeforeStep == ILAstOptimizationStep.GotoRemoval) return;
 			new GotoRemoval().RemoveGotos(method);
 			
 			if (abortBeforeStep == ILAstOptimizationStep.DuplicateReturns) return;
 			DuplicateReturnStatements(method);
 			
-			if (abortBeforeStep == ILAstOptimizationStep.FlattenIfStatements) return;
-			FlattenIfStatements(method);
+			if (abortBeforeStep == ILAstOptimizationStep.ReduceIfNesting) return;
+			ReduceIfNesting(method);
 			
-			if (abortBeforeStep == ILAstOptimizationStep.InlineVariables2) return;
+			if (abortBeforeStep == ILAstOptimizationStep.InlineVariables3) return;
 			// The 2nd inlining pass is necessary because DuplicateReturns and the introduction of ternary operators
 			// open up additional inlining possibilities.
 			new ILInlining(method).InlineAllVariables();
 			
-			TypeAnalysis.Reset(method);
+			if (abortBeforeStep == ILAstOptimizationStep.CachedDelegateInitialization) return;
+			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
+				for (int i = 0; i < block.Body.Count; i++) {
+					// TODO: Move before loops
+					CachedDelegateInitialization(block, ref i);
+				}
+			}
 			
-			if (abortBeforeStep == ILAstOptimizationStep.PeepholeTransforms) return;
-			PeepholeTransforms.Run(context, method);
+			if (abortBeforeStep == ILAstOptimizationStep.IntroduceFixedStatements) return;
+			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
+				for (int i = block.Body.Count - 1; i >= 0; i--) {
+					// TODO: Move before loops
+					if (i < block.Body.Count)
+						IntroduceFixedStatements(block.Body, i);
+				}
+			}
+			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
+				for (int i = block.Body.Count - 1; i >= 0; i--) {
+					// TODO: Move before loops
+					if (i < block.Body.Count)
+						IntroduceFixedStatements(block.Body, i);
+				}
+			}
 			
 			if (abortBeforeStep == ILAstOptimizationStep.TypeInference2) return;
+			TypeAnalysis.Reset(method);
 			TypeAnalysis.Run(context, method);
 			
+			if (abortBeforeStep == ILAstOptimizationStep.RemoveRedundantCode3) return;
 			GotoRemoval.RemoveRedundantCode(method);
 			
 			// ReportUnassignedILRanges(method);
@@ -234,277 +286,54 @@ namespace ICSharpCode.Decompiler.ILAst
 			List<ILNode> basicBlocks = new List<ILNode>();
 			
 			ILBasicBlock basicBlock = new ILBasicBlock() {
-				EntryLabel = new ILLabel() { Name = "Block_" + (nextLabelIndex++) }
+				EntryLabel = block.Body.FirstOrDefault() as ILLabel ?? new ILLabel() { Name = "Block_" + (nextLabelIndex++) }
 			};
 			basicBlocks.Add(basicBlock);
 			block.EntryGoto = new ILExpression(ILCode.Br, basicBlock.EntryLabel);
 			
 			if (block.Body.Count > 0) {
-				basicBlock.Body.Add(block.Body[0]);
+				if (block.Body[0] != basicBlock.EntryLabel)
+					basicBlock.Body.Add(block.Body[0]);
 				
 				for (int i = 1; i < block.Body.Count; i++) {
 					ILNode lastNode = block.Body[i - 1];
 					ILNode currNode = block.Body[i];
 					
-					// Insert split
+					// Start a new basic block if necessary
 					if (currNode is ILLabel ||
-					    lastNode is ILTryCatchBlock ||
 					    currNode is ILTryCatchBlock ||
-					    (lastNode is ILExpression) && ((ILExpression)lastNode).IsBranch() ||
-					    (currNode is ILExpression) && (((ILExpression)currNode).IsBranch() && ((ILExpression)currNode).Code.CanFallThough() && basicBlock.Body.Count > 0))
+					    lastNode is ILTryCatchBlock ||
+					    lastNode.IsConditionalControlFlow() ||
+					    lastNode.IsUnconditionalControlFlow())
 					{
-						ILBasicBlock lastBlock = basicBlock;
+						// Try to reuse the label
+						ILLabel label = currNode is ILLabel ? ((ILLabel)currNode) : new ILLabel() { Name = "Block_" + (nextLabelIndex++) };
+						
+						// Terminate the last block
+						if (!lastNode.IsUnconditionalControlFlow()) {
+							// Explicit branch from one block to other
+							basicBlock.FallthoughGoto = new ILExpression(ILCode.Br, label);
+						} else if (lastNode.Match(ILCode.Br)) {
+							// Reuse the existing goto as FallthoughGoto
+							basicBlock.FallthoughGoto = (ILExpression)lastNode;
+							basicBlock.Body.RemoveAt(basicBlock.Body.Count - 1);
+						}
+						
+						// Start the new block						
 						basicBlock = new ILBasicBlock();
 						basicBlocks.Add(basicBlock);
-						
-						if (currNode is ILLabel) {
-							// Insert as entry label
-							basicBlock.EntryLabel = (ILLabel)currNode;
-						} else {
-							basicBlock.EntryLabel = new ILLabel() { Name = "Block_" + (nextLabelIndex++) };
-							basicBlock.Body.Add(currNode);
-						}
-						
-						// Explicit branch from one block to other
-						// (unless the last expression was unconditional branch)
-						if (!(lastNode is ILExpression) || ((ILExpression)lastNode).Code.CanFallThough()) {
-							lastBlock.FallthoughGoto = new ILExpression(ILCode.Br, basicBlock.EntryLabel);
-						}
-					} else {
+						basicBlock.EntryLabel = label;
+					}
+					
+					// Add the node to the basic block
+					if (currNode != basicBlock.EntryLabel) {
 						basicBlock.Body.Add(currNode);
 					}
 				}
 			}
 			
-			foreach (ILBasicBlock bb in basicBlocks) {
-				if (bb.Body.Count > 0 &&
-				    bb.Body.Last() is ILExpression &&
-				    ((ILExpression)bb.Body.Last()).Code == ILCode.Br)
-				{
-					Debug.Assert(bb.FallthoughGoto == null);
-					bb.FallthoughGoto = (ILExpression)bb.Body.Last();
-					bb.Body.RemoveAt(bb.Body.Count - 1);
-				}
-			}
-			
 			block.Body = basicBlocks;
 			return;
-		}
-		
-		Dictionary<ILLabel, int> labelGlobalRefCount;
-		Dictionary<ILLabel, ILBasicBlock> labelToBasicBlock;
-		
-		void AnalyseLabels(ILBlock method)
-		{
-			labelGlobalRefCount = new Dictionary<ILLabel, int>();
-			foreach(ILLabel target in method.GetSelfAndChildrenRecursive<ILExpression>(e => e.IsBranch()).SelectMany(e => e.GetBranchTargets())) {
-				if (!labelGlobalRefCount.ContainsKey(target))
-					labelGlobalRefCount[target] = 0;
-				labelGlobalRefCount[target]++;
-			}
-			
-			labelToBasicBlock = new Dictionary<ILLabel, ILBasicBlock>();
-			foreach(ILBasicBlock bb in method.GetSelfAndChildrenRecursive<ILBasicBlock>()) {
-				foreach(ILLabel label in bb.GetChildren().OfType<ILLabel>()) {
-					labelToBasicBlock[label] = bb;
-				}
-			}
-		}
-		
-		// scope is modified if successful
-		bool TrySimplifyTernaryOperator(List<ILNode> scope, ILBasicBlock head, int index)
-		{
-			Debug.Assert(scope.Contains(head));
-			
-			ILExpression condExpr;
-			ILLabel trueLabel;
-			ILLabel falseLabel;
-			ILVariable trueLocVar = null;
-			ILExpression trueExpr;
-			ILLabel trueFall;
-			ILVariable falseLocVar = null;
-			ILExpression falseExpr;
-			ILLabel falseFall;
-			object unused;
-			
-			if (head.Match(ILCode.Brtrue, out trueLabel, out condExpr, out falseLabel) &&
-			    labelGlobalRefCount[trueLabel] == 1 &&
-			    labelGlobalRefCount[falseLabel] == 1 &&
-			    ((labelToBasicBlock[trueLabel].Match(ILCode.Stloc, out trueLocVar, out trueExpr, out trueFall) &&
-			      labelToBasicBlock[falseLabel].Match(ILCode.Stloc, out falseLocVar, out falseExpr, out falseFall)) ||
-			     (labelToBasicBlock[trueLabel].Match(ILCode.Ret, out unused, out trueExpr, out trueFall) &&
-			      labelToBasicBlock[falseLabel].Match(ILCode.Ret, out unused, out falseExpr, out falseFall))) &&
-			    trueLocVar == falseLocVar &&
-			    trueFall == falseFall &&
-			    scope.Contains(labelToBasicBlock[trueLabel]) &&
-			    scope.Contains(labelToBasicBlock[falseLabel])
-			   )
-			{
-				ILCode opCode = trueLocVar != null ? ILCode.Stloc : ILCode.Ret;
-				TypeReference retType = trueLocVar != null ? trueLocVar.Type : this.context.CurrentMethod.ReturnType;
-				int leftBoolVal;
-				int rightBoolVal;
-				ILExpression newExpr;
-				// a ? true:false  is equivalent to  a
-				// a ? false:true  is equivalent to  !a
-				// a ? true : b    is equivalent to  a || b
-				// a ? b : true    is equivalent to  !a || b
-				// a ? b : false   is equivalent to  a && b
-				// a ? false : b   is equivalent to  !a && b
-				if (retType == typeSystem.Boolean &&
-				    trueExpr.Match(ILCode.Ldc_I4, out leftBoolVal) &&
-				    falseExpr.Match(ILCode.Ldc_I4, out rightBoolVal) &&
-				    ((leftBoolVal != 0 && rightBoolVal == 0) || (leftBoolVal == 0 && rightBoolVal != 0))
-				   )
-				{
-					// It can be expressed as trivilal expression
-					if (leftBoolVal != 0) {
-						newExpr = condExpr;
-					} else {
-						newExpr = new ILExpression(ILCode.LogicNot, null, condExpr);
-					}
-				} else if (retType == typeSystem.Boolean && trueExpr.Match(ILCode.Ldc_I4, out leftBoolVal)) {
-					// It can be expressed as logical expression
-					if (leftBoolVal != 0) {
-						newExpr = new ILExpression(ILCode.LogicOr, null, condExpr, falseExpr);
-					} else {
-						newExpr = new ILExpression(ILCode.LogicAnd, null, new ILExpression(ILCode.LogicNot, null, condExpr), falseExpr);
-					}
-				} else if (retType == typeSystem.Boolean && falseExpr.Match(ILCode.Ldc_I4, out rightBoolVal)) {
-					// It can be expressed as logical expression
-					if (rightBoolVal != 0) {
-						newExpr = new ILExpression(ILCode.LogicOr, null, new ILExpression(ILCode.LogicNot, null, condExpr), trueExpr);
-					} else {
-						newExpr = new ILExpression(ILCode.LogicAnd, null, condExpr, trueExpr);
-					}
-				} else {
-					// Ternary operator tends to create long complicated return statements					
-					if (opCode == ILCode.Ret)
-						return false;
-					
-					// Create ternary expression
-					newExpr = new ILExpression(ILCode.TernaryOp, null, condExpr, trueExpr, falseExpr);
-				}
-				head.Body = new List<ILNode>() { new ILExpression(opCode, trueLocVar, newExpr) };
-				head.FallthoughGoto = trueFall != null ? new ILExpression(ILCode.Br, trueFall) : null;
-				
-				// Remove the old basic blocks
-				foreach(ILLabel deleteLabel in new [] { trueLabel, falseLabel }) {
-					scope.RemoveOrThrow(labelToBasicBlock[deleteLabel]);
-					labelGlobalRefCount.RemoveOrThrow(deleteLabel);
-					labelToBasicBlock.RemoveOrThrow(deleteLabel);
-				}
-				
-				return true;
-			}
-			return false;
-		}
-		
-		bool TrySimplifyNullCoalescing(List<ILNode> scope, ILBasicBlock head, int index)
-		{
-			// ...
-			// v = ldloc(leftVar)
-			// br(condBBLabel)
-			//
-			// condBBLabel:
-			// brtrue(endBBLabel, ldloc(leftVar))
-			// br(rightBBLabel)
-			//
-			// rightBBLabel:
-			// v = rightExpr
-			// br(endBBLabel)
-			//
-			// endBBLabel:
-			// ...
-				
-			ILVariable v, v2;
-			ILExpression leftExpr, leftExpr2;
-			ILVariable leftVar, leftVar2;
-			ILLabel condBBLabel;
-			ILBasicBlock condBB;
-			ILLabel endBBLabel, endBBLabel2;
-			ILLabel rightBBLabel;
-			ILBasicBlock rightBB;
-			ILExpression rightExpr;
-			ILBasicBlock endBB;
-			if (head.Body.LastOrDefault().Match(ILCode.Stloc, out v, out leftExpr) &&
-			    leftExpr.Match(ILCode.Ldloc, out leftVar) &&
-			    head.FallthoughGoto.Match(ILCode.Br, out condBBLabel) &&
-			    labelToBasicBlock.TryGetValue(condBBLabel, out condBB) &&
-			    condBB.Match(ILCode.Brtrue, out endBBLabel, out leftExpr2, out rightBBLabel) &&
-			    leftExpr2.Match(ILCode.Ldloc, out leftVar2) &&
-			    leftVar == leftVar2 &&
-			    labelToBasicBlock.TryGetValue(rightBBLabel, out rightBB) &&
-			    rightBB.Match(ILCode.Stloc, out v2, out rightExpr, out endBBLabel2) &&
-			    v == v2 &&
-			    endBBLabel == endBBLabel2 &&
-			    labelToBasicBlock.TryGetValue(endBBLabel, out endBB) &&
-			    labelGlobalRefCount.GetOrDefault(condBBLabel) == 1 &&
-			    labelGlobalRefCount.GetOrDefault(rightBBLabel) == 1 &&
-			    labelGlobalRefCount.GetOrDefault(endBBLabel) == 2 &&
-			    scope.Contains(condBB) &&
-			    scope.Contains(rightBB) &&
-			    scope.Contains(endBB)
-			   )
-			{
-				head.Body[head.Body.Count - 1] = new ILExpression(ILCode.Stloc, v, new ILExpression(ILCode.NullCoalescing, null, leftExpr, rightExpr));
-				head.FallthoughGoto = new ILExpression(ILCode.Br, endBBLabel);
-				
-				foreach(ILLabel deleteLabel in new [] { condBBLabel, rightBBLabel }) {
-					scope.RemoveOrThrow(labelToBasicBlock[deleteLabel]);
-					labelGlobalRefCount.RemoveOrThrow(deleteLabel);
-					labelToBasicBlock.RemoveOrThrow(deleteLabel);
-				}
-				return true;
-			}
-			return false;
-		}
-		
-		// scope is modified if successful
-		bool TrySimplifyShortCircuit(List<ILNode> scope, ILBasicBlock head, int index)
-		{
-			Debug.Assert(scope.Contains(head));
-			
-			ILExpression condExpr;
-			ILLabel trueLabel;
-			ILLabel falseLabel;
-			if(head.Match(ILCode.Brtrue, out trueLabel, out condExpr, out falseLabel)) {
-				for (int pass = 0; pass < 2; pass++) {
-					
-					// On the second pass, swap labels and negate expression of the first branch
-					// It is slightly ugly, but much better then copy-pasting this whole block
-					ILLabel nextLabel   = (pass == 0) ? trueLabel  : falseLabel;
-					ILLabel otherLablel = (pass == 0) ? falseLabel : trueLabel;
-					bool    negate      = (pass == 1);
-					
-					ILBasicBlock nextBasicBlock = labelToBasicBlock[nextLabel];
-					ILExpression nextCondExpr;
-					ILLabel nextTrueLablel;
-					ILLabel nextFalseLabel;
-					if (scope.Contains(nextBasicBlock) &&
-					    nextBasicBlock != head &&
-					    labelGlobalRefCount[nextBasicBlock.EntryLabel] == 1 &&
-					    nextBasicBlock.Match(ILCode.Brtrue, out nextTrueLablel, out nextCondExpr, out nextFalseLabel) &&
-					    (otherLablel == nextFalseLabel || otherLablel == nextTrueLablel))
-					{
-						// Create short cicuit branch
-						if (otherLablel == nextFalseLabel) {
-							head.Body[0] = new ILExpression(ILCode.Brtrue, nextTrueLablel, new ILExpression(ILCode.LogicAnd, null, negate ? new ILExpression(ILCode.LogicNot, null, condExpr) : condExpr, nextCondExpr));
-						} else {
-							head.Body[0] = new ILExpression(ILCode.Brtrue, nextTrueLablel, new ILExpression(ILCode.LogicOr, null, negate ? condExpr : new ILExpression(ILCode.LogicNot, null, condExpr), nextCondExpr));
-						}
-						head.FallthoughGoto = new ILExpression(ILCode.Br, nextFalseLabel);
-						
-						// Remove the inlined branch from scope
-						labelGlobalRefCount.RemoveOrThrow(nextBasicBlock.EntryLabel);
-						labelToBasicBlock.RemoveOrThrow(nextBasicBlock.EntryLabel);
-						scope.RemoveOrThrow(nextBasicBlock);
-						
-						return true;
-					}
-				}
-			}
-			return false;
 		}
 		
 		void DuplicateReturnStatements(ILBlock method)
@@ -589,15 +418,15 @@ namespace ICSharpCode.Decompiler.ILAst
 		/// Reduce the nesting of conditions.
 		/// It should be done on flat data that already had most gotos removed
 		/// </summary>
-		void FlattenIfStatements(ILNode node)
+		void ReduceIfNesting(ILNode node)
 		{
 			ILBlock block = node as ILBlock;
 			if (block != null) {
 				for (int i = 0; i < block.Body.Count; i++) {
 					ILCondition cond = block.Body[i] as ILCondition;
 					if (cond != null) {
-						bool trueExits = cond.TrueBlock.Body.Count > 0 && !cond.TrueBlock.Body.Last().CanFallThough();
-						bool falseExits = cond.FalseBlock.Body.Count > 0 && !cond.FalseBlock.Body.Last().CanFallThough();
+						bool trueExits = cond.TrueBlock.Body.LastOrDefault().IsUnconditionalControlFlow();
+						bool falseExits = cond.FalseBlock.Body.LastOrDefault().IsUnconditionalControlFlow();
 						
 						if (trueExits) {
 							// Move the false block after the condition
@@ -624,7 +453,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			// We are changing the number of blocks so we use plain old recursion to get all blocks
 			foreach(ILNode child in node.GetChildren()) {
 				if (child != null && !(child is ILExpression))
-					FlattenIfStatements(child);
+					ReduceIfNesting(child);
 			}
 		}
 		
@@ -642,28 +471,42 @@ namespace ICSharpCode.Decompiler.ILAst
 		/// Perform one pass of a given optimization on this block.
 		/// This block must consist of only basicblocks.
 		/// </summary>
-		public static bool RunPeepholeOptimization(this ILBlock block, Func<List<ILNode>, ILBasicBlock, int, bool> optimization)
+		public static bool RunOptimization(this ILBlock block, Func<List<ILNode>, ILBasicBlock, int, bool> optimization)
 		{
 			bool modified = false;
 			List<ILNode> body = block.Body;
-			for (int i = 0; i < body.Count;) {
-				if (optimization(body, (ILBasicBlock)body[i], i)) {
+			for (int i = body.Count - 1; i >= 0; i--) {
+				if (i < body.Count && optimization(body, (ILBasicBlock)body[i], i)) {
 					modified = true;
-					i = Math.Max(0, i - 1); // Go back one step
-				} else {
-					i++;
 				}
 			}
 			return modified;
 		}
 		
-		public static bool CanFallThough(this ILNode node)
+		public static bool RunOptimization(this ILBlock block, Func<List<ILNode>, ILExpression, int, bool> optimization)
+		{
+			bool modified = false;
+			foreach (ILBasicBlock bb in block.Body) {
+				for (int i = bb.Body.Count - 1; i >= 0; i--) {
+					ILExpression expr = bb.Body.ElementAtOrDefault(i) as ILExpression;
+					if (expr != null && optimization(bb.Body, expr, i)) {
+						modified = true;
+					}
+				}
+			}
+			return modified;
+		}
+		
+		public static bool IsConditionalControlFlow(this ILNode node)
 		{
 			ILExpression expr = node as ILExpression;
-			if (expr != null) {
-				return expr.Code.CanFallThough();
-			}
-			return true;
+			return expr != null && expr.Code.IsConditionalControlFlow();
+		}
+		
+		public static bool IsUnconditionalControlFlow(this ILNode node)
+		{
+			ILExpression expr = node as ILExpression;
+			return expr != null && expr.Code.IsUnconditionalControlFlow();
 		}
 		
 		/// <summary>
@@ -689,6 +532,24 @@ namespace ICSharpCode.Decompiler.ILAst
 			}
 		}
 		
+		public static bool IsStoreToArray(this ILCode code)
+		{
+			switch (code) {
+				case ILCode.Stelem_Any:
+				case ILCode.Stelem_I:
+				case ILCode.Stelem_I1:
+				case ILCode.Stelem_I2:
+				case ILCode.Stelem_I4:
+				case ILCode.Stelem_I8:
+				case ILCode.Stelem_R4:
+				case ILCode.Stelem_R8:
+				case ILCode.Stelem_Ref:
+					return true;
+				default:
+					return false;
+			}
+		}
+		
 		/// <summary>
 		/// Can the expression be used as a statement in C#?
 		/// </summary>
@@ -702,6 +563,7 @@ namespace ICSharpCode.Decompiler.ILAst
 					return !mr.Name.StartsWith("get_", StringComparison.Ordinal);
 				case ILCode.Newobj:
 				case ILCode.Newarr:
+				case ILCode.Stloc:
 					return true;
 				default:
 					return false;

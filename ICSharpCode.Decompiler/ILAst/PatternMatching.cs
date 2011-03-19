@@ -4,7 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-
+using System.Linq;
 using Mono.Cecil;
 
 namespace ICSharpCode.Decompiler.ILAst
@@ -20,12 +20,21 @@ namespace ICSharpCode.Decompiler.ILAst
 		public static bool Match<T>(this ILNode node, ILCode code, out T operand)
 		{
 			ILExpression expr = node as ILExpression;
-			if (expr != null && expr.Prefixes == null && expr.Code == code) {
+			if (expr != null && expr.Prefixes == null && expr.Code == code && expr.Arguments.Count == 0) {
 				operand = (T)expr.Operand;
-				Debug.Assert(expr.Arguments.Count == 0);
 				return true;
 			}
 			operand = default(T);
+			return false;
+		}
+		
+		public static bool Match<T>(this ILNode node, ILCode code, T operand)
+		{
+			ILExpression expr = node as ILExpression;
+			if (expr != null && expr.Prefixes == null && expr.Code == code) {
+				Debug.Assert(expr.Arguments.Count == 0);
+				return operand.Equals(expr.Operand);
+			}
 			return false;
 		}
 		
@@ -89,7 +98,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			return false;
 		}
 		
-		public static bool Match<T>(this ILBasicBlock bb, ILCode code, out T operand, out ILExpression arg, out ILLabel fallLabel)
+		public static bool MatchSingle<T>(this ILBasicBlock bb, ILCode code, out T operand, out ILExpression arg, out ILLabel fallLabel)
 		{
 			if (bb.Body.Count == 1) {
 				if (bb.Body[0].Match(code, out operand, out arg)) {
@@ -103,10 +112,28 @@ namespace ICSharpCode.Decompiler.ILAst
 			return false;
 		}
 		
+		public static bool MatchLast<T>(this ILBasicBlock bb, ILCode code, out T operand, out ILExpression arg, out ILLabel fallLabel)
+		{
+			if (bb.Body.LastOrDefault().Match(code, out operand, out arg)) {
+				fallLabel = bb.FallthoughGoto != null ? (ILLabel)bb.FallthoughGoto.Operand : null;
+				return true;
+			}
+			operand = default(T);
+			arg = null;
+			fallLabel = null;
+			return false;
+		}
+		
 		public static bool MatchThis(this ILNode node)
 		{
 			ILVariable v;
 			return node.Match(ILCode.Ldloc, out v) && v.IsParameter && v.OriginalParameter.Index == -1;
+		}
+		
+		public static bool MatchLdloc(this ILNode node, ILVariable expectedVar)
+		{
+			ILVariable v;
+			return node.Match(ILCode.Ldloc, out v) && v == expectedVar;
 		}
 	}
 }
