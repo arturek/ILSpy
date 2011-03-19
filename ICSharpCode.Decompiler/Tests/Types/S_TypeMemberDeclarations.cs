@@ -669,3 +669,46 @@ namespace MethodHideGeneric2
 		}
 	}
 }
+//$$ MethodHideDiffSignatures
+namespace MethodHideDiffSignatures
+{
+	public class C1<T>
+	{
+		public virtual void M(T arg)
+		{
+		}
+	}
+	public class C2<T1, T2> : C1<T2>
+	{
+		public new virtual void M(T2 arg)
+		{
+		}
+	}
+	public class C3 : C2<int, bool>
+	{
+		public new virtual void M(bool arg)
+		{
+		}
+	}
+}
+//$$ MethodHideStatic
+namespace MethodHideStatic
+{
+	public class A
+	{
+		public int N
+		{
+			get
+			{
+				return 0;
+			}
+		}
+	}
+	public class B
+	{
+		public int N()
+		{
+			return 0;
+		}
+	}
+}
