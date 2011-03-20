@@ -62,7 +62,7 @@ namespace ICSharpCode.Decompiler.Tests
 
 			var pipeline =
 				decompiler.CreateStandardCodeTransformationPipeline()
-				.Concat(new IAstTransform[] { new Helpers.RemoveCompilerAttribute()});
+				.InsertBefore(el => el is IntroduceUsingDeclarations, new Helpers.RemoveCompilerAttribute());
 
 			StringWriter output = new StringWriter();
 			decompiler.TransformAndGenerateCode(new PlainTextOutput(output), pipeline);
@@ -92,6 +92,21 @@ namespace ICSharpCode.Decompiler.Tests
 			{
 				File.Delete(results.PathToAssembly);
 				results.TempFiles.Delete();
+			}
+		}
+	}
+
+	public static partial class Mixin
+	{
+		public static IEnumerable<T> InsertBefore<T>(this IEnumerable<T> items, Predicate<T> condition, T insertedElement)
+		{
+			bool inserted = false;
+			foreach (var item in items) {
+				if (!inserted && condition(item)) {
+					yield return insertedElement;
+					inserted = true;
+				}
+				yield return item;
 			}
 		}
 	}
