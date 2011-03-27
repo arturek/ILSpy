@@ -22,7 +22,6 @@ namespace ICSharpCode.Decompiler.Ast
 		TypeSystem typeSystem;
 		DecompilerContext context;
 		HashSet<ILVariable> localVariablesToDefine = new HashSet<ILVariable>(); // local variables that are missing a definition
-		HashSet<ILVariable> implicitlyDefinedVariables = new HashSet<ILVariable>(); // local variables that are implicitly defined (e.g. catch handler)
 		
 		/// <summary>
 		/// Creates the body for the method definition.
@@ -89,8 +88,11 @@ namespace ICSharpCode.Decompiler.Ast
 			context.CancellationToken.ThrowIfCancellationRequested();
 			Ast.BlockStatement astBlock = TransformBlock(ilMethod);
 			CommentStatement.ReplaceAll(astBlock); // convert CommentStatements to Comments
-			foreach (ILVariable v in localVariablesToDefine.Except(implicitlyDefinedVariables)) {
-				DeclareVariableInSmallestScope.DeclareVariable(astBlock, AstBuilder.ConvertType(v.Type), v.Name);
+			
+			Statement insertionPoint = astBlock.Statements.FirstOrDefault();
+			foreach (ILVariable v in localVariablesToDefine) {
+				var newVarDecl = new VariableDeclarationStatement(AstBuilder.ConvertType(v.Type), v.Name);
+				astBlock.Statements.InsertBefore(insertionPoint, newVarDecl);
 			}
 			
 			return astBlock;
@@ -158,8 +160,6 @@ namespace ICSharpCode.Decompiler.Ast
 				var tryCatchStmt = new Ast.TryCatchStatement();
 				tryCatchStmt.TryBlock = TransformBlock(tryCatchNode.TryBlock);
 				foreach (var catchClause in tryCatchNode.CatchBlocks) {
-					if (catchClause.ExceptionVariable != null)
-						implicitlyDefinedVariables.Add(catchClause.ExceptionVariable);
 					tryCatchStmt.CatchClauses.Add(
 						new Ast.CatchClause {
 							Type = AstBuilder.ConvertType(catchClause.ExceptionType),
@@ -221,43 +221,55 @@ namespace ICSharpCode.Decompiler.Ast
 			Ast.Expression arg2 = args.Count >= 2 ? args[1] : null;
 			Ast.Expression arg3 = args.Count >= 3 ? args[2] : null;
 			
-			switch(byteCode.Code) {
+			switch (byteCode.Code) {
 					#region Arithmetic
 				case ILCode.Add:
 				case ILCode.Add_Ovf:
 				case ILCode.Add_Ovf_Un:
 					{
+						BinaryOperatorExpression boe;
 						if (byteCode.InferredType is PointerType) {
 							if (byteCode.Arguments[0].ExpectedType is PointerType) {
 								arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
-								return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2)
-									.WithAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
+								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
+								boe.AddAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
 							} else if (byteCode.Arguments[1].ExpectedType is PointerType) {
 								arg1 = DivideBySize(arg1, ((PointerType)byteCode.InferredType).ElementType);
-								return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2)
-									.WithAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
+								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
+								boe.AddAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
+							} else {
+								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
 							}
+						} else {
+							boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
 						}
-						return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
+						boe.AddAnnotation(byteCode.Code == ILCode.Add ? AddCheckedBlocks.UncheckedAnnotation : AddCheckedBlocks.CheckedAnnotation);
+						return boe;
 					}
 				case ILCode.Sub:
 				case ILCode.Sub_Ovf:
 				case ILCode.Sub_Ovf_Un:
 					{
+						BinaryOperatorExpression boe;
 						if (byteCode.InferredType is PointerType) {
 							if (byteCode.Arguments[0].ExpectedType is PointerType) {
 								arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
-								return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2)
-									.WithAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
+								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2);
+								boe.WithAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
+							} else {
+								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2);
 							}
+						} else {
+							boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2);
 						}
-						return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2);
+						boe.AddAnnotation(byteCode.Code == ILCode.Sub ? AddCheckedBlocks.UncheckedAnnotation : AddCheckedBlocks.CheckedAnnotation);
+						return boe;
 					}
 					case ILCode.Div:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Divide, arg2);
 					case ILCode.Div_Un:     return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Divide, arg2);
-					case ILCode.Mul:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2);
-					case ILCode.Mul_Ovf:    return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2);
-					case ILCode.Mul_Ovf_Un: return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2);
+					case ILCode.Mul:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2).WithAnnotation(AddCheckedBlocks.UncheckedAnnotation);
+					case ILCode.Mul_Ovf:    return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2).WithAnnotation(AddCheckedBlocks.CheckedAnnotation);
+					case ILCode.Mul_Ovf_Un: return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2).WithAnnotation(AddCheckedBlocks.CheckedAnnotation);
 					case ILCode.Rem:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Modulus, arg2);
 					case ILCode.Rem_Un:     return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Modulus, arg2);
 					case ILCode.And:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.BitwiseAnd, arg2);
@@ -266,8 +278,19 @@ namespace ICSharpCode.Decompiler.Ast
 					case ILCode.Shl:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.ShiftLeft, arg2);
 					case ILCode.Shr:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.ShiftRight, arg2);
 					case ILCode.Shr_Un:     return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.ShiftRight, arg2);
-					case ILCode.Neg:        return new Ast.UnaryOperatorExpression(UnaryOperatorType.Minus, arg1);
+					case ILCode.Neg:        return new Ast.UnaryOperatorExpression(UnaryOperatorType.Minus, arg1).WithAnnotation(AddCheckedBlocks.UncheckedAnnotation);
 					case ILCode.Not:        return new Ast.UnaryOperatorExpression(UnaryOperatorType.BitNot, arg1);
+				case ILCode.PostIncrement:
+				case ILCode.PostIncrement_Ovf:
+				case ILCode.PostIncrement_Ovf_Un:
+					{
+						if (arg1 is DirectionExpression)
+							arg1 = ((DirectionExpression)arg1).Expression.Detach();
+						var uoe = new Ast.UnaryOperatorExpression(
+							(int)byteCode.Operand > 0 ? UnaryOperatorType.PostIncrement : UnaryOperatorType.PostDecrement, arg1);
+						uoe.AddAnnotation((byteCode.Code == ILCode.PostIncrement) ? AddCheckedBlocks.UncheckedAnnotation : AddCheckedBlocks.CheckedAnnotation);
+						return uoe;
+					}
 					#endregion
 					#region Arrays
 				case ILCode.Newarr:
@@ -301,7 +324,8 @@ namespace ICSharpCode.Decompiler.Ast
 				case ILCode.Ldelem_Ref:
 				case ILCode.Ldelem_Any:
 					return arg1.Indexer(arg2);
-					case ILCode.Ldelema: return MakeRef(arg1.Indexer(arg2));
+				case ILCode.Ldelema:
+					return MakeRef(arg1.Indexer(arg2));
 				case ILCode.Stelem_I:
 				case ILCode.Stelem_I1:
 				case ILCode.Stelem_I2:
@@ -312,6 +336,18 @@ namespace ICSharpCode.Decompiler.Ast
 				case ILCode.Stelem_Ref:
 				case ILCode.Stelem_Any:
 					return new Ast.AssignmentExpression(arg1.Indexer(arg2), arg3);
+				case ILCode.CompoundAssignment:
+					{
+						BinaryOperatorExpression boe = (BinaryOperatorExpression)arg1;
+						return new Ast.AssignmentExpression {
+							Left = boe.Left.Detach(),
+							Operator = ReplaceMethodCallsWithOperators.GetAssignmentOperatorForBinaryOperator(boe.Operator),
+							Right = boe.Right.Detach()
+						}.CopyAnnotationsFrom(boe);
+						// We do not mark the resulting assignment as RestoreOriginalAssignOperatorAnnotation, because
+						// the operator cannot be translated back to the expanded form (as the left-hand expression
+						// would be evaluated twice, and might have side-effects)
+					}
 					#endregion
 					#region Comparison
 					case ILCode.Ceq: return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Equality, arg2);
@@ -357,10 +393,18 @@ namespace ICSharpCode.Decompiler.Ast
 				case ILCode.Conv_U8:
 				case ILCode.Conv_I:
 				case ILCode.Conv_U:
-					return arg1; // conversion is handled by Convert() function using the info from type analysis
-					case ILCode.Conv_R4:   return arg1.CastTo(typeof(float));
-					case ILCode.Conv_R8:   return arg1.CastTo(typeof(double));
-					case ILCode.Conv_R_Un: return arg1.CastTo(typeof(double)); // TODO
+					{
+						// conversion was handled by Convert() function using the info from type analysis
+						CastExpression cast = arg1 as CastExpression;
+						if (cast != null) {
+							cast.AddAnnotation(AddCheckedBlocks.UncheckedAnnotation);
+						}
+						return arg1;
+					}
+				case ILCode.Conv_R4:
+				case ILCode.Conv_R8:
+				case ILCode.Conv_R_Un: // TODO
+					return arg1;
 				case ILCode.Conv_Ovf_I1:
 				case ILCode.Conv_Ovf_I2:
 				case ILCode.Conv_Ovf_I4:
@@ -377,7 +421,14 @@ namespace ICSharpCode.Decompiler.Ast
 				case ILCode.Conv_Ovf_U2_Un:
 				case ILCode.Conv_Ovf_U4_Un:
 				case ILCode.Conv_Ovf_U8_Un:
-					return arg1; // conversion was handled by Convert() function using the info from type analysis
+					{
+						// conversion was handled by Convert() function using the info from type analysis
+						CastExpression cast = arg1 as CastExpression;
+						if (cast != null) {
+							cast.AddAnnotation(AddCheckedBlocks.CheckedAnnotation);
+						}
+						return arg1;
+					}
 					case ILCode.Conv_Ovf_I:     return arg1.CastTo(typeof(IntPtr)); // TODO
 					case ILCode.Conv_Ovf_U:     return arg1.CastTo(typeof(UIntPtr));
 					case ILCode.Conv_Ovf_I_Un:  return arg1.CastTo(typeof(IntPtr));
@@ -404,8 +455,14 @@ namespace ICSharpCode.Decompiler.Ast
 					#endregion
 					case ILCode.Arglist:  return InlineAssembly(byteCode, args);
 					case ILCode.Break:    return InlineAssembly(byteCode, args);
-					case ILCode.Call:     return TransformCall(false, operand, methodDef, args);
-					case ILCode.Callvirt: return TransformCall(true, operand, methodDef, args);
+				case ILCode.Call:
+				case ILCode.CallGetter:
+				case ILCode.CallSetter:
+					return TransformCall(false, operand, args);
+				case ILCode.Callvirt:
+				case ILCode.CallvirtGetter:
+				case ILCode.CallvirtSetter:
+					return TransformCall(true, operand,  args);
 					case ILCode.Ldftn: {
 						Cecil.MethodReference cecilMethod = ((MethodReference)operand);
 						var expr = new Ast.IdentifierExpression(cecilMethod.Name);
@@ -461,7 +518,10 @@ namespace ICSharpCode.Decompiler.Ast
 						AstBuilder.ConvertType(((FieldReference)operand).DeclaringType)
 						.Member(((FieldReference)operand).Name).WithAnnotation(operand),
 						arg1);
-					case ILCode.Ldflda:  return MakeRef(arg1.Member(((FieldReference) operand).Name).WithAnnotation(operand));
+				case ILCode.Ldflda:
+					if (arg1 is DirectionExpression)
+						arg1 = ((DirectionExpression)arg1).Expression.Detach();
+					return MakeRef(arg1.Member(((FieldReference) operand).Name).WithAnnotation(operand));
 				case ILCode.Ldsflda:
 					return MakeRef(
 						AstBuilder.ConvertType(((FieldReference)operand).DeclaringType)
@@ -638,7 +698,7 @@ namespace ICSharpCode.Decompiler.Ast
 			return new DefaultValueExpression { Type = AstBuilder.ConvertType(type) };
 		}
 		
-		static AstNode TransformCall(bool isVirtual, object operand, MethodDefinition methodDef, List<Ast.Expression> args)
+		AstNode TransformCall(bool isVirtual, object operand, List<Ast.Expression> args)
 		{
 			Cecil.MethodReference cecilMethod = ((MethodReference)operand);
 			Ast.Expression target;
@@ -658,7 +718,7 @@ namespace ICSharpCode.Decompiler.Ast
 			}
 			if (target is ThisReferenceExpression && !isVirtual) {
 				// a non-virtual call on "this" might be a "base"-call.
-				if ((cecilMethod.DeclaringType.IsGenericInstance ? cecilMethod.DeclaringType.GetElementType() : cecilMethod.DeclaringType) != methodDef.DeclaringType) {
+				if (cecilMethod.DeclaringType.GetElementType() != methodDef.DeclaringType) {
 					// If we're not calling a method in the current class; we must be calling one in the base class.
 					target = new BaseReferenceExpression();
 				}
@@ -676,6 +736,8 @@ namespace ICSharpCode.Decompiler.Ast
 			
 			if (cecilMethod.Name == "Get" && cecilMethod.DeclaringType is ArrayType && methodArgs.Count > 1) {
 				return target.Indexer(methodArgs);
+			} else if (cecilMethod.Name == "Address" && cecilMethod.DeclaringType is ArrayType && methodArgs.Count > 1) {
+				return MakeRef(target.Indexer(methodArgs));
 			} else if (cecilMethod.Name == "Set" && cecilMethod.DeclaringType is ArrayType && methodArgs.Count > 2) {
 				return new AssignmentExpression(target.Indexer(methodArgs.GetRange(0, methodArgs.Count - 1)), methodArgs.Last());
 			}
@@ -839,7 +901,7 @@ namespace ICSharpCode.Decompiler.Ast
 		
 		Ast.Expression Convert(Ast.Expression expr, Cecil.TypeReference actualType, Cecil.TypeReference reqType)
 		{
-			if (reqType == null || actualType == reqType) {
+			if (actualType == null || reqType == null || TypeAnalysis.IsSameType(actualType, reqType)) {
 				return expr;
 			} else if (actualType is ByReferenceType && reqType is PointerType && expr is DirectionExpression) {
 				return Convert(
@@ -882,10 +944,12 @@ namespace ICSharpCode.Decompiler.Ast
 				{
 					return expr.CastTo(AstBuilder.ConvertType(actualType));
 				}
-
-				if (actualIsIntegerOrEnum && requiredIsIntegerOrEnum) {
-					if (actualType.FullName == reqType.FullName)
-						return expr;
+				
+				bool actualIsPrimitiveType = actualIsIntegerOrEnum
+					|| actualType.MetadataType == MetadataType.Single || actualType.MetadataType == MetadataType.Double;
+				bool requiredIsPrimitiveType = requiredIsIntegerOrEnum
+					|| reqType.MetadataType == MetadataType.Single || reqType.MetadataType == MetadataType.Double;
+				if (actualIsPrimitiveType && requiredIsPrimitiveType) {
 					return expr.CastTo(AstBuilder.ConvertType(reqType));
 				}
 				return expr;

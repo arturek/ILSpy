@@ -16,6 +16,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		InlineVariables,
 		CopyPropagation,
 		YieldReturn,
+		PropertyAccessInstructions,
 		SplitToMovableBlocks,
 		TypeInference,
 		SimplifyShortCircuit,
@@ -27,6 +28,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		TransformArrayInitializers,
 		TransformCollectionInitializers,
 		MakeAssignmentExpression,
+		IntroducePostIncrement,
 		InlineVariables2,
 		FindLoops,
 		FindConditions,
@@ -38,6 +40,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		InlineVariables3,
 		CachedDelegateInitialization,
 		IntroduceFixedStatements,
+		RecombineVariables,
 		TypeInference2,
 		RemoveRedundantCode3,
 		None
@@ -78,6 +81,9 @@ namespace ICSharpCode.Decompiler.ILAst
 			if (abortBeforeStep == ILAstOptimizationStep.YieldReturn) return;
 			YieldReturnDecompiler.Run(context, method);
 			
+			if (abortBeforeStep == ILAstOptimizationStep.PropertyAccessInstructions) return;
+			IntroducePropertyAccessInstructions(method);
+			
 			if (abortBeforeStep == ILAstOptimizationStep.SplitToMovableBlocks) return;
 			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
 				SplitToBasicBlocks(block);
@@ -106,6 +112,7 @@ namespace ICSharpCode.Decompiler.ILAst
 					
 					if (abortBeforeStep == ILAstOptimizationStep.TransformDecimalCtorToConstant) return;
 					modified |= block.RunOptimization(TransformDecimalCtorToConstant);
+					modified |= block.RunOptimization(SimplifyLdcI4ConvI8);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyLdObjAndStObj) return;
 					modified |= block.RunOptimization(SimplifyLdObjAndStObj);
@@ -118,6 +125,10 @@ namespace ICSharpCode.Decompiler.ILAst
 					
 					if (abortBeforeStep == ILAstOptimizationStep.MakeAssignmentExpression) return;
 					modified |= block.RunOptimization(MakeAssignmentExpression);
+					modified |= block.RunOptimization(MakeCompoundAssignments);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.IntroducePostIncrement) return;
+					modified |= block.RunOptimization(IntroducePostIncrement);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.InlineVariables2) return;
 					modified |= new ILInlining(method).InlineAllInBlock(block);
@@ -179,6 +190,9 @@ namespace ICSharpCode.Decompiler.ILAst
 						IntroduceFixedStatements(block.Body, i);
 				}
 			}
+			
+			if (abortBeforeStep == ILAstOptimizationStep.RecombineVariables) return;
+			RecombineVariables(method);
 			
 			if (abortBeforeStep == ILAstOptimizationStep.TypeInference2) return;
 			TypeAnalysis.Reset(method);
@@ -272,6 +286,42 @@ namespace ICSharpCode.Decompiler.ILAst
 							continue;
 					}
 					((ILExpression)block.Body[i]).Arguments.Single().ILRanges.AddRange(expr.ILRanges);
+				}
+			}
+		}
+		
+		/// <summary>
+		/// Converts call and callvirt instructions that read/write properties into CallGetter/CallSetter instructions.
+		/// 
+		/// CallGetter/CallSetter is used to allow the ILAst to represent "while ((SomeProperty = value) != null)".
+		/// </summary>
+		void IntroducePropertyAccessInstructions(ILBlock method)
+		{
+			foreach (ILExpression expr in method.GetSelfAndChildrenRecursive<ILExpression>()) {
+				if (expr.Code == ILCode.Call || expr.Code == ILCode.Callvirt) {
+					MethodReference cecilMethod = (MethodReference)expr.Operand;
+					if (cecilMethod.DeclaringType is ArrayType) {
+						switch (cecilMethod.Name) {
+							case "Get":
+								expr.Code = ILCode.CallGetter;
+								break;
+							case "Set":
+								expr.Code = ILCode.CallSetter;
+								break;
+							case "Address":
+								expr.Code = ILCode.CallGetter;
+								expr.AddPrefix(new ILExpressionPrefix(ILCode.PropertyAddress));
+								break;
+						}
+					} else {
+						MethodDefinition cecilMethodDef = cecilMethod.Resolve();
+						if (cecilMethodDef != null) {
+							if (cecilMethodDef.IsGetter)
+								expr.Code = (expr.Code == ILCode.Call) ? ILCode.CallGetter : ILCode.CallvirtGetter;
+							else if (cecilMethodDef.IsSetter)
+								expr.Code = (expr.Code == ILCode.Call) ? ILCode.CallSetter : ILCode.CallvirtSetter;
+						}
+					}
 				}
 			}
 		}
@@ -458,6 +508,25 @@ namespace ICSharpCode.Decompiler.ILAst
 			}
 		}
 		
+		void RecombineVariables(ILBlock method)
+		{
+			// Recombine variables that were split when the ILAst was created
+			// This ensures that a single IL variable is a single C# variable (gets assigned only one name)
+			// The DeclareVariables transformation might then split up the C# variable again if it is used indendently in two separate scopes.
+			Dictionary<VariableDefinition, ILVariable> dict = new Dictionary<VariableDefinition, ILVariable>();
+			foreach (ILExpression expr in method.GetSelfAndChildrenRecursive<ILExpression>()) {
+				ILVariable v = expr.Operand as ILVariable;
+				if (v != null && v.OriginalVariable != null) {
+					ILVariable combinedVariable;
+					if (!dict.TryGetValue(v.OriginalVariable, out combinedVariable)) {
+						dict.Add(v.OriginalVariable, v);
+						combinedVariable = v;
+					}
+					expr.Operand = combinedVariable;
+				}
+			}
+		}
+		
 		void ReportUnassignedILRanges(ILBlock method)
 		{
 			var unassigned = ILRange.Invert(method.GetSelfAndChildrenRecursive<ILExpression>().SelectMany(e => e.ILRanges), context.CurrentMethod.Body.CodeSize).ToList();
@@ -511,7 +580,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		}
 		
 		/// <summary>
-		/// The expression has no effect on the program and can be removed 
+		/// The expression has no effect on the program and can be removed
 		/// if its return value is not needed.
 		/// </summary>
 		public static bool HasNoSideEffects(this ILExpression expr)
@@ -545,6 +614,27 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.Stelem_R4:
 				case ILCode.Stelem_R8:
 				case ILCode.Stelem_Ref:
+					return true;
+				default:
+					return false;
+			}
+		}
+		
+		public static bool IsLoadFromArray(this ILCode code)
+		{
+			switch (code) {
+				case ILCode.Ldelem_Any:
+				case ILCode.Ldelem_I:
+				case ILCode.Ldelem_I1:
+				case ILCode.Ldelem_I2:
+				case ILCode.Ldelem_I4:
+				case ILCode.Ldelem_I8:
+				case ILCode.Ldelem_U1:
+				case ILCode.Ldelem_U2:
+				case ILCode.Ldelem_U4:
+				case ILCode.Ldelem_R4:
+				case ILCode.Ldelem_R8:
+				case ILCode.Ldelem_Ref:
 					return true;
 				default:
 					return false;
