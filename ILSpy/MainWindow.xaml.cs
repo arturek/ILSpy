@@ -520,6 +520,8 @@ namespace ICSharpCode.ILSpy
 			{
 				treeView.SelectedItems.Add(node);
 			}
+			if (newState.Item1.Any())
+				treeView.ScrollIntoView(newState.Item1.First());
 			ignoreDecompilationRequests = false;
 			DecompileSelectedNodes(newState.Item2);
 		}
