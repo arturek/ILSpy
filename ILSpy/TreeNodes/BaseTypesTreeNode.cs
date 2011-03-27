@@ -53,41 +53,40 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			AddBaseTypes(this.Children, type);
 		}
 		
-		internal static void AddBaseTypes(SharpTreeNodeCollection children, TypeDefinition type, TypeReference[] typeArguments = null)
+		internal static void AddBaseTypes(SharpTreeNodeCollection children, TypeReference type)
 		{
-			if(typeArguments == null && (type.BaseType != null || type.HasInterfaces) && type.HasGenericParameters)
-				typeArguments = type.GenericParameters.ToArray();
-			if (type.BaseType != null)
-				children.Add(new BaseTypesEntryNode(type.BaseType, MapTypeArguments(type.BaseType, typeArguments), false));
-			foreach (TypeReference i in type.Interfaces) {
-				children.Add(new BaseTypesEntryNode(i, MapTypeArguments(i, typeArguments), true));
-			}
+			var def = type.Resolve();
+			if (def.BaseType != null)
+				children.Add(new BaseTypesEntryNode(ResolveWithTypes(def.BaseType, type), false));
+			foreach (TypeReference i in def.Interfaces)
+				children.Add(new BaseTypesEntryNode(ResolveWithTypes(i, type), true));
 		}
 
-		private static TypeReference[] MapTypeArguments(TypeReference type, TypeReference[] typeArguments)
+		private static TypeReference ResolveWithTypes(TypeReference type, TypeReference genericArgumentsProvider)
 		{
 			var gType = type as GenericInstanceType;
 			if (gType == null)
-				return null;
-			var newTypeArguments = new TypeReference[gType.GenericArguments.Count];
-			for (int index = 0; index < newTypeArguments.Length; index++) {
-				var gArgument = gType.GenericArguments[index] as GenericParameter;
-				if (gArgument != null)
-					newTypeArguments[index] = typeArguments[gArgument.Position];
-				else
-					newTypeArguments[index] = MapType(gType.GenericArguments[index], typeArguments);
+				return type;
+
+			var newGType = new GenericInstanceType(gType.ElementType);
+
+			foreach (var arg in gType.GenericArguments) {
+				var gParameter = arg as GenericParameter;
+				TypeReference newGArgument = gParameter != null
+					? GetTypeParameterValue(gParameter.Position, genericArgumentsProvider)
+					: ResolveWithTypes(arg, genericArgumentsProvider);
+				newGType.GenericArguments.Add(newGArgument);
 			}
-			return newTypeArguments;
+			return newGType;
 		}
 
-		private static TypeReference MapType(TypeReference type, TypeReference[] typeArguments)
+		private static TypeReference GetTypeParameterValue(int position, TypeReference genericArgumentsProvider)
 		{
-			if (type is GenericInstanceType) {
-				var newType = new GenericInstanceType(type);
-				newType.GenericArguments.AddRange(MapTypeArguments(type, typeArguments));
-				return newType;
-			} else
-				return type;
+			var gInstance = genericArgumentsProvider as GenericInstanceType;
+			if (gInstance != null)
+				return gInstance.GenericArguments[position];
+			else
+				return genericArgumentsProvider.GenericParameters[position];
 		}
 		
 		public override void Decompile(Language language, ITextOutput output, DecompilationOptions options)
@@ -102,16 +101,14 @@ namespace ICSharpCode.ILSpy.TreeNodes
 	sealed class BaseTypesEntryNode : ILSpyTreeNode
 	{
 		TypeReference tr;
-		TypeReference[] typeArguments;
 		TypeDefinition def;
 		bool isInterface;
 		
-		public BaseTypesEntryNode(TypeReference tr, TypeReference[] typeArguments, bool isInterface)
+		public BaseTypesEntryNode(TypeReference tr, bool isInterface)
 		{
 			if (tr == null)
 				throw new ArgumentNullException("tr");
 			this.tr = tr;
-			this.typeArguments = typeArguments;
 			this.def = tr.Resolve();
 			this.isInterface = isInterface;
 			this.LazyLoading = true;
@@ -124,8 +121,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		}
 
 		public override object Text {
-			get { return FormatTypeName(tr, typeArguments: typeArguments); }
-			//get { return this.Language.TypeToString(tr, true); }
+			get { return this.Language.TypeToString(tr, true); }
 		}
 		
 		public override object Icon {
@@ -140,7 +136,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		protected override void LoadChildren()
 		{
 			if (def != null)
-				BaseTypesTreeNode.AddBaseTypes(this.Children, def, typeArguments);
+				BaseTypesTreeNode.AddBaseTypes(this.Children, tr);
 		}
 		
 		public override void ActivateItem(System.Windows.RoutedEventArgs e)

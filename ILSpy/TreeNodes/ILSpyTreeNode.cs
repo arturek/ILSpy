@@ -165,43 +165,6 @@ namespace ICSharpCode.ILSpy.TreeNodes
 					ApplyFilterToChild(node);
 			}
 		}
-
-		protected static string FormatTypeName(Mono.Cecil.TypeReference type, bool fullName = false, Mono.Cecil.TypeReference[] typeArguments = null)
-		{
-			var extensionIndex = type.Name.IndexOf("`");
-			if (extensionIndex >= 0) {
-				var builder = new System.Text.StringBuilder();
-
-				if (fullName) {
-					if (type.IsNested)
-						builder.Append(FormatTypeName(type.DeclaringType, true));
-					else if (!String.IsNullOrEmpty(type.Namespace))
-						builder.AppendFormat("{0}.", type.Namespace);
-				}
-
-				builder.Append(type.Name.Substring(0, extensionIndex));
-				builder.Append('<');
-				var gInstance = type as Mono.Cecil.GenericInstanceType;
-				if (gInstance != null) {
-					bool firstItem = true;
-					foreach (var typeArg in (IEnumerable<Mono.Cecil.TypeReference>)typeArguments ?? gInstance.GenericArguments) {
-						if (firstItem)
-							firstItem = false;
-						else
-							builder.Append(", ");
-						builder.Append(FormatTypeName(typeArg));
-					}
-				}
-				else for (int index = 0; index < type.GenericParameters.Count; index++) {
-					if (index > 0)
-						builder.Append(", ");
-					builder.Append(type.GenericParameters[index].Name);
-				}
-				builder.Append('>');
-				return builder.ToString();
-			} else
-				return fullName ? type.FullName : type.Name;
-		}
 	}
 	
 	public enum FilterResult
