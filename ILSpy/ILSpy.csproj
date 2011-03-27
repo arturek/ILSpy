@@ -120,6 +120,8 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TreeNodes\Analyzer\AnalyzedPropertyOverridesTreeNode.cs" />
+    <Compile Include="TreeNodes\Analyzer\AnalyzedPropertyTreeNode.cs" />
     <Compile Include="XamlResourceNode.cs" />
     <EmbeddedResource Include="..\README.txt">
       <Link>README.txt</Link>

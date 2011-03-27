@@ -17,6 +17,8 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using ICSharpCode.Decompiler;
 using Mono.Cecil;
 
@@ -36,7 +38,6 @@ namespace ICSharpCode.ILSpy.TreeNodes
 				throw new ArgumentNullException("property");
 			this.property = property;
 			this.isIndexer = isIndexer;
-			
 			if (property.GetMethod != null)
 				this.Children.Add(new MethodTreeNode(property.GetMethod));
 			if (property.SetMethod != null)
@@ -45,20 +46,31 @@ namespace ICSharpCode.ILSpy.TreeNodes
 				foreach (var m in property.OtherMethods)
 					this.Children.Add(new MethodTreeNode(m));
 			}
+			
 		}
-		
+
 		public PropertyDefinition PropertyDefinition {
 			get { return property; }
 		}
 		
 		public override object Text {
-			get { return HighlightSearchMatch(property.Name, " : " + this.Language.TypeToString(property.PropertyType, false, property)); }
+			get { return GetText(property, Language); }
 		}
 		
+		public static object GetText(PropertyDefinition property, Language language)
+		{
+			return HighlightSearchMatch(property.Name, " : " + language.TypeToString(property.PropertyType, false, property));
+		}
+
 		public override object Icon {
 			get {
-				return isIndexer ? Images.Indexer : Images.Property;
+				return GetIcon(property, isIndexer);
 			}
+		}
+
+		public static BitmapImage GetIcon(PropertyDefinition property, bool? isIndexer = null)
+		{
+			return (isIndexer ?? false) ? Images.Indexer : Images.Property;
 		}
 		
 		public override FilterResult Filter(FilterSettings settings)
@@ -72,6 +84,20 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		public override void Decompile(Language language, ITextOutput output, DecompilationOptions options)
 		{
 			language.DecompileProperty(property, output, options);
+		}
+
+		public override System.Windows.Controls.ContextMenu GetContextMenu()
+		{
+			if (Analyzer.AnalyzedPropertyOverridesTreeNode.CanShowAnalyzer(property)) {
+				ContextMenu menu = new ContextMenu();
+				MenuItem item = new MenuItem() { Header = "Analyze", Icon = new Image() { Source = Images.Search } };
+				item.Click += delegate { MainWindow.Instance.AddToAnalyzer(new Analyzer.AnalyzedPropertyTreeNode(property)); };
+
+				menu.Items.Add(item);
+
+				return menu;
+			} else
+				return base.GetContextMenu();
 		}
 	}
 }
