@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -201,6 +202,53 @@ namespace ICSharpCode.Decompiler
 			if (member.IsCompilerGenerated())
 				return true;
 			return IsCompilerGeneratedOrIsInCompilerGeneratedClass(member.DeclaringType);
+		}
+
+		public static string GetDefaultMemberName(this TypeDefinition type)
+		{
+			CustomAttribute attr;
+			return type.GetDefaultMemberName(out attr);
+		}
+
+		public static string GetDefaultMemberName(this TypeDefinition type, out CustomAttribute defaultMemberAttribute)
+		{
+			if (type.HasCustomAttributes)
+				foreach (CustomAttribute ca in type.CustomAttributes)
+					if (ca.Constructor.FullName == @"System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)") {
+						defaultMemberAttribute = ca;
+						return ca.ConstructorArguments.Single().Value as string;
+					}
+			defaultMemberAttribute = null;
+			return null;
+		}
+
+		public static bool IsIndexer(this PropertyDefinition property)
+		{
+			CustomAttribute attr;
+			return property.IsIndexer(out attr);
+		}
+
+		public static bool IsIndexer(this PropertyDefinition property, out CustomAttribute defaultMemberAttribute)
+		{
+			defaultMemberAttribute = null;
+			if (property.HasParameters) {
+				if ((property.GetMethod ?? property.SetMethod).HasOverrides) {
+					var overridedAccessor = (property.GetMethod ?? property.SetMethod).Overrides.First();
+					var oa = overridedAccessor.Resolve();
+					if (oa == null)
+						return false;
+					var overridedProperty = oa.DeclaringType.Properties.First(prop => prop.GetMethod == oa || prop.SetMethod == oa);
+					return overridedProperty.IsIndexer();
+				} else {
+					CustomAttribute attr;
+					var defaultMemberName = property.DeclaringType.GetDefaultMemberName(out attr);
+					if (defaultMemberName == property.Name) {
+						defaultMemberAttribute = attr;
+						return true;
+					}
+				}
+			}
+			return false;
 		}
 	}
 }

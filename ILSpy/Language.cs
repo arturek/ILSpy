@@ -105,6 +105,11 @@ namespace ICSharpCode.ILSpy
 			else
 				return type.Name;
 		}
+
+		public virtual string FormatPropertyName(PropertyDefinition property, bool? isIndexer)
+		{
+			return property.Name;
+		}
 		
 		/// <summary>
 		/// Used for WPF keyboard navigation.

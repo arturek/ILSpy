@@ -18,18 +18,21 @@
 
 using System;
 using Mono.Cecil;
+using ICSharpCode.Decompiler;
 
 namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 {
 	class AnalyzedPropertyTreeNode : AnalyzerTreeNode
 	{
 		PropertyDefinition analyzedProperty;
+		bool isIndexer;
 		string prefix;
 		
 		public AnalyzedPropertyTreeNode(PropertyDefinition analyzedProperty, string prefix = "")
 		{
 			if (analyzedProperty == null)
 				throw new ArgumentNullException("analyzedMethod");
+			this.isIndexer = analyzedProperty.IsIndexer();
 			this.analyzedProperty = analyzedProperty;
 			this.prefix = prefix;
 			this.LazyLoading = true;

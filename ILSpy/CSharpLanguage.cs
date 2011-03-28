@@ -407,7 +407,33 @@ namespace ICSharpCode.ILSpy
 			astType.AcceptVisitor(new OutputVisitor(w, new CSharpFormattingPolicy()), null);
 			return w.ToString();
 		}
-		
+
+		public override string FormatPropertyName(PropertyDefinition property, bool? isIndexer)
+		{
+			if (!isIndexer.HasValue) {
+				isIndexer = property.IsIndexer();
+			}
+			if (isIndexer.Value) {
+				var buffer = new System.Text.StringBuilder();
+				if ((property.GetMethod ?? property.SetMethod).HasOverrides) {
+					buffer.Append(TypeToString((property.GetMethod ?? property.SetMethod).Overrides.First().Resolve().DeclaringType, true));
+					buffer.Append(@".");
+				}
+				buffer.Append(@"this[");
+				bool addSeparator = false;
+				foreach (var p in property.Parameters) {
+					if (addSeparator)
+						buffer.Append(@", ");
+					else
+						addSeparator = true;
+					buffer.Append(TypeToString(p.ParameterType, true));
+				}
+				buffer.Append(@"]");
+				return buffer.ToString();
+			} else
+				return base.FormatPropertyName(property, isIndexer);
+		}
+	
 		public override bool ShowMember(MemberReference member)
 		{
 			return showAllMembers || !AstBuilder.MemberIsHidden(member, new DecompilationOptions().DecompilerSettings);

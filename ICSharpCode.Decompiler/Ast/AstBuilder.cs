@@ -157,10 +157,14 @@ namespace ICSharpCode.Decompiler.Ast
 			AstNode node = method.IsConstructor ? (AstNode)CreateConstructor(method) : CreateMethod(method);
 			astCompileUnit.AddChild(node, CompilationUnit.MemberRole);
 		}
-		
+
 		public void AddProperty(PropertyDefinition property)
 		{
-			astCompileUnit.AddChild(CreateProperty(property), CompilationUnit.MemberRole);
+			MemberDeclaration astProp = CreateProperty(property);
+			if (property.IsIndexer()) {
+				astProp = ConvertPropertyToIndexer((PropertyDeclaration)astProp, property);
+			}
+			astCompileUnit.AddChild(astProp, CompilationUnit.MemberRole);
 		}
 		
 		public void AddField(FieldDefinition field)
@@ -600,14 +604,10 @@ namespace ICSharpCode.Decompiler.Ast
 			foreach (PropertyDefinition propDef in typeDef.Properties) {
 				MemberDeclaration astProp = CreateProperty(propDef);
 
-				if (astProp.Name == "Item" && propDef.HasParameters) {
-					var defaultMember = GetDefaultMember(astType.Annotation<TypeDefinition>());
-					if (defaultMember.Item1 == "Item") {
-						astProp = ConvertPropertyToIndexer((PropertyDeclaration)astProp, propDef);
-						attributeToRemove = defaultMember.Item2;
-					} else if ((propDef.GetMethod ?? propDef.SetMethod).HasOverrides) {
-						astProp = ConvertPropertyToIndexer((PropertyDeclaration)astProp, propDef);
-					}
+				CustomAttribute attr;
+				if (propDef.IsIndexer(out attr)) {
+					attributeToRemove = attr;
+					astProp = ConvertPropertyToIndexer((PropertyDeclaration)astProp, propDef);
 				}
 
 				astType.AddChild(astProp, TypeDeclaration.MemberRole);
@@ -1245,19 +1245,6 @@ namespace ICSharpCode.Decompiler.Ast
 				return false;
 
 			return type.CustomAttributes.Any(attr => attr.AttributeType.FullName == "System.FlagsAttribute");
-		}
-
-		/// <summary>
-		/// Gets the name of the default member of the type pointed by the <see cref="System.Reflection.DefaultMemberAttribute"/> attribute.
-		/// </summary>
-		/// <param name="type">The type definition.</param>
-		/// <returns>The name of the default member or null if no <see cref="System.Reflection.DefaultMemberAttribute"/> attribute has been found.</returns>
-		private static Tuple<string, CustomAttribute> GetDefaultMember(TypeDefinition type)
-		{
-			foreach (CustomAttribute ca in type.CustomAttributes)
-				if (ca.Constructor.FullName == "System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)")
-					return Tuple.Create(ca.ConstructorArguments.Single().Value as string, ca);
-			return new Tuple<string,CustomAttribute>(null, null);
 		}
 	}
 }
