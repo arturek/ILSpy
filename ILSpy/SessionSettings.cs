@@ -48,8 +48,10 @@ namespace ICSharpCode.ILSpy
 			
 			this.WindowState = FromString((string)doc.Element("WindowState"), WindowState.Normal);
 			this.WindowBounds = FromString((string)doc.Element("WindowBounds"), new Rect(10, 10, 750, 550));
-			this.SplitterPosition = FromString((string)doc.Element("SplitterPosition"), 0.4);
-			this.AnalyzerSplitterPosition = FromString((string)doc.Element("AnalyzerSplitterPosition"), 0.3);
+			
+			var layoutElement = doc.Element("Layout");
+			if(layoutElement != null)
+				this.DockManagerSettings = layoutElement.Elements().First();
 		}
 		
 		public event PropertyChangedEventHandler PropertyChanged;
@@ -68,8 +70,8 @@ namespace ICSharpCode.ILSpy
 		
 		public WindowState WindowState = WindowState.Normal;
 		public Rect WindowBounds;
-		public double SplitterPosition;
-		public double AnalyzerSplitterPosition;
+		
+		public XElement DockManagerSettings;
 		
 		public void Save()
 		{
@@ -83,8 +85,9 @@ namespace ICSharpCode.ILSpy
 			}
 			doc.Add(new XElement("WindowState", ToString(this.WindowState)));
 			doc.Add(new XElement("WindowBounds", ToString(this.WindowBounds)));
-			doc.Add(new XElement("SplitterPosition", ToString(this.SplitterPosition)));
-			doc.Add(new XElement("AnalyzerSplitterPosition", ToString(this.AnalyzerSplitterPosition)));
+			if(this.DockManagerSettings != null){
+				doc.Add(new XElement("Layout", this.DockManagerSettings));
+			}
 			
 			ILSpySettings.SaveSettings(doc);
 		}

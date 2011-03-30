@@ -29,7 +29,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using System.Xml.Linq;
 
+using AvalonDock;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.FlowAnalysis;
 using ICSharpCode.ILSpy.TextView;
@@ -85,19 +87,24 @@ namespace ICSharpCode.ILSpy
 			
 			InitializeComponent();
 			App.CompositionContainer.ComposeParts(this);
-			Grid.SetRow(decompilerTextView, 1);
-			rightPane.Children.Add(decompilerTextView);
+			documentPane.Items.Add(new DocumentContent{
+			                       Title = "Decompiler",
+			                       Content = decompilerTextView,
+			                       });
 			
-			if (sessionSettings.SplitterPosition > 0 && sessionSettings.SplitterPosition < 1) {
-				leftColumn.Width = new GridLength(sessionSettings.SplitterPosition, GridUnitType.Star);
-				rightColumn.Width = new GridLength(1 - sessionSettings.SplitterPosition, GridUnitType.Star);
-			}
 			sessionSettings.FilterSettings.PropertyChanged += filterSettings_PropertyChanged;
 			
 			InitMainMenu();
 			InitToolbar();
 			
 			this.Loaded += new RoutedEventHandler(MainWindow_Loaded);
+			
+			this.dockManager.Loaded += delegate { 
+				if(sessionSettings.DockManagerSettings != null)
+				{
+					dockManager.RestoreLayout(sessionSettings.DockManagerSettings.CreateReader());
+				}
+			 };
 		}
 		
 		#region Toolbar extensibility
@@ -212,19 +219,21 @@ namespace ICSharpCode.ILSpy
 		void ShowMessageIfUpdatesAvailableAsync(ILSpySettings spySettings)
 		{
 			AboutPage.CheckForUpdatesIfEnabledAsync(spySettings).ContinueWith(
-				delegate (Task<string> task) {
+				delegate (Task<UpdatedDetails> task) {
 					if (task.Result != null) {
-						updateAvailableDownloadUrl = task.Result;
-						updateAvailablePanel.Visibility = Visibility.Visible;
+						
+						updateAvailableDownloadUrl = task.Result.DownloadUrl;
+						var updateAvailableDocument = new DocumentContent
+						{
+							Name = "UpdateDoc",
+							Title = "New version available",
+						};
+						updateAvailableDocument.Content = task.Result;
+						updateAvailableDocument.Show(dockManager);
 					}
 				},
 				TaskScheduler.FromCurrentSynchronizationContext()
 			);
-		}
-		
-		void updateAvailablePanelCloseButtonClick(object sender, RoutedEventArgs e)
-		{
-			updateAvailablePanel.Visibility = Visibility.Collapsed;
 		}
 		
 		void downloadUpdateButtonClick(object sender, RoutedEventArgs e)
@@ -534,13 +543,11 @@ namespace ICSharpCode.ILSpy
 			if (analyzerTree.Root == null)
 				analyzerTree.Root = new AnalyzerTreeNode { Language = sessionSettings.FilterSettings.Language };
 			
-			if (!showAnalyzer.IsChecked)
-				showAnalyzer.IsChecked = true;
-			
 			node.IsExpanded = true;
 			analyzerTree.Root.Children.Add(node);
 			analyzerTree.SelectedItem = node;
 			analyzerTree.FocusNode(node);
+			analyzerContent.Show();
 		}
 		#endregion
 		
@@ -558,26 +565,17 @@ namespace ICSharpCode.ILSpy
 			sessionSettings.ActiveAssemblyList = assemblyList.ListName;
 			sessionSettings.ActiveTreeViewPath = GetPathForNode(treeView.SelectedItem as SharpTreeNode);
 			sessionSettings.WindowBounds = this.RestoreBounds;
-			sessionSettings.SplitterPosition = leftColumn.Width.Value / (leftColumn.Width.Value + rightColumn.Width.Value);
-			if (showAnalyzer.IsChecked)
-				sessionSettings.AnalyzerSplitterPosition = analyzerRow.Height.Value / (analyzerRow.Height.Value + textViewRow.Height.Value);
+			var xDoc= new XDocument();
+			using(var writer = xDoc.CreateWriter())
+				dockManager.SaveLayout(writer);
+			sessionSettings.DockManagerSettings = xDoc.Root;
+			
 			sessionSettings.Save();
 		}
 		
-		void ShowAnalyzer_Checked(object sender, RoutedEventArgs e)
+		void ShowAnalyzer_Click(object sender, RoutedEventArgs e)
 		{
-			analyzerRow.MinHeight = 100;
-			if (sessionSettings.AnalyzerSplitterPosition > 0 && sessionSettings.AnalyzerSplitterPosition < 1) {
-				textViewRow.Height = new GridLength(1 - sessionSettings.AnalyzerSplitterPosition, GridUnitType.Star);
-				analyzerRow.Height = new GridLength(sessionSettings.AnalyzerSplitterPosition, GridUnitType.Star);
-			}
-		}
-		
-		void ShowAnalyzer_Unchecked(object sender, RoutedEventArgs e)
-		{
-			sessionSettings.AnalyzerSplitterPosition = analyzerRow.Height.Value / (analyzerRow.Height.Value + textViewRow.Height.Value);
-			analyzerRow.MinHeight = 0;
-			analyzerRow.Height = new GridLength(0);
+			analyzerContent.Show();
 		}
 	}
 }

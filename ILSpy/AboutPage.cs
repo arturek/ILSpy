@@ -235,9 +235,9 @@ namespace ICSharpCode.ILSpy
 		/// Returns the download URL if an update is available.
 		/// Returns null if no update is available, or if no check was performed.
 		/// </summary>
-		public static Task<string> CheckForUpdatesIfEnabledAsync(ILSpySettings spySettings)
+		public static Task<UpdatedDetails> CheckForUpdatesIfEnabledAsync(ILSpySettings spySettings)
 		{
-			var tcs = new TaskCompletionSource<string>();
+			var tcs = new TaskCompletionSource<UpdatedDetails>();
 			UpdateSettings s = new UpdateSettings(spySettings);
 			if (s.AutomaticUpdateCheckEnabled) {
 				// perform update check if we never did one before;
@@ -252,7 +252,11 @@ namespace ICSharpCode.ILSpy
 								s.LastSuccessfulUpdateCheck = DateTime.UtcNow;
 								AvailableVersionInfo v = task.Result;
 								if (v.Version > currentVersion)
-									tcs.SetResult(v.DownloadUrl);
+									tcs.SetResult(new UpdatedDetails {
+									              	CurrentVersion = currentVersion,
+									              	NewVersion = v.Version,
+									              	DownloadUrl = v.DownloadUrl,
+									              });
 								else
 									tcs.SetResult(null);
 							} catch (AggregateException) {
@@ -276,5 +280,14 @@ namespace ICSharpCode.ILSpy
 	public interface IAboutPageAddition
 	{
 		void Write(ISmartTextOutput textOutput);
+	}
+	
+	public class UpdatedDetails
+	{
+		public Version CurrentVersion { get; set; }
+
+		public Version NewVersion { get; set; }
+		
+		public string DownloadUrl { get; set; }
 	}
 }

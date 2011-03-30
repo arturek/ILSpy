@@ -5,6 +5,7 @@
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:tv="clr-namespace:ICSharpCode.TreeView;assembly=ICSharpCode.TreeView"
 	xmlns:local="clr-namespace:ICSharpCode.ILSpy" xmlns:textView="clr-namespace:ICSharpCode.ILSpy.TextView"
 	xmlns:controls="clr-namespace:ICSharpCode.ILSpy.Controls"
+	xmlns:ad="clr-namespace:AvalonDock;assembly=AvalonDock"
 	Title="ILSpy"
 	MinWidth="250"
 	MinHeight="200"
@@ -14,6 +15,17 @@
 >
 	<Window.Resources>
 		<BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+		<DataTemplate DataType="{x:Type local:UpdatedDetails}">
+			<Grid>
+				<Grid.RowDefinitions>
+					<RowDefinition Height="Auto"/>
+					<RowDefinition Height="Auto"/>
+					<RowDefinition Height="*"/>
+				</Grid.RowDefinitions>
+					<TextBlock>A new ILSpy version is available.</TextBlock>
+					<Button Grid.Row="1" Click="downloadUpdateButtonClick" HorizontalAlignment="Left">Download</Button>
+			</Grid>
+		</DataTemplate>
 	</Window.Resources>
 	<Window.CommandBindings>
 		<CommandBinding
@@ -44,7 +56,7 @@
 						<Image Width="16" Height="16" Source="Images/PrivateInternal.png" />
 					</MenuItem.Icon>
 				</MenuItem>
-				<MenuItem Header="Show _analyzer" Name="showAnalyzer" IsCheckable="True" Checked="ShowAnalyzer_Checked" Unchecked="ShowAnalyzer_Unchecked" />
+				<MenuItem Header="Show _analyzer" Name="showAnalyzer" Click="ShowAnalyzer_Click" />
 			</MenuItem>
 		</Menu>
 		<!-- ToolBar -->
@@ -76,84 +88,39 @@
 			          SelectedItem="{Binding FilterSettings.Language}" />
 		</ToolBar>
 		<!-- Main grid separating left pane (treeView) from main pane (textEditor) -->
-		<Grid>
-			<Grid.ColumnDefinitions>
-				<ColumnDefinition
-					Name="leftColumn"
-					MinWidth="100"
-					Width="0.4*" />
-				<ColumnDefinition
-					Width="3" />
-				<ColumnDefinition
-					Name="rightColumn"
-					MinWidth="100"
-					Width="0.6*" />
-			</Grid.ColumnDefinitions>
-			<Grid.RowDefinitions>
-				<RowDefinition
-					Height="*" />
-			</Grid.RowDefinitions>
-			<!-- Left pane: Search bar + Tree View -->
-			<DockPanel>
-				<!-- Search bar -->
-				<controls:SearchBox DockPanel.Dock="Top" WatermarkText="Search" WatermarkColor="Gray" ToolTip="Search"
-					Text="{Binding FilterSettings.SearchTerm}" />
-				<!-- Tree View of assemblies and classes -->
-				<tv:SharpTreeView
-					Name="treeView"
-					SelectionChanged="TreeView_SelectionChanged"
-					ShowRoot="False"
-					AllowDropOrder="True"
-					AllowDrop="True" />
-			</DockPanel>
-			<GridSplitter
-				Grid.ZIndex="1"
-				Grid.Column="1"
-				Margin="-5,0"
-				BorderThickness="5,0"
-				HorizontalAlignment="Center"
-				VerticalAlignment="Stretch"
-				BorderBrush="Transparent" />
-			<!-- Right pane: Text Editor -->
-			<Grid Grid.Column="2" Name="rightPane">
-				<Grid.ColumnDefinitions>
-					<ColumnDefinition
-						Width="*" />
-				</Grid.ColumnDefinitions>
-				<Grid.RowDefinitions>
-					<RowDefinition Height="Auto" />
-					<RowDefinition Height="0.7*" MinHeight="100" Name="textViewRow" />
-					<RowDefinition Height="1" />
-					<RowDefinition Height="0" Name="analyzerRow" />
-				</Grid.RowDefinitions>
-				<Border BorderBrush="Black" BorderThickness="1" Name="updateAvailablePanel" Visibility="Collapsed">
-					<DockPanel>
-						<Button DockPanel.Dock="Right" Click="updateAvailablePanelCloseButtonClick" MinWidth="0">X</Button>
-						<StackPanel Orientation="Horizontal">
-							<TextBlock Margin="4,0" VerticalAlignment="Center">A new ILSpy version is available.</TextBlock>
-							<Button Click="downloadUpdateButtonClick">Download</Button>
-						</StackPanel>
-					</DockPanel>
-				</Border>
-				
-				<!-- decompilerTextView is inserted into row 1 by code -->
-				
-				<GridSplitter
-					Grid.ZIndex="1"
-					Grid.Row="2"
-					Margin="0,-2,0,-5"
-					BorderThickness="0,2,0,5"
-					BorderBrush="Transparent"
-					HorizontalAlignment="Stretch"
-					VerticalAlignment="Center"
-					Visibility="{Binding IsChecked, ElementName=showAnalyzer, Converter={StaticResource BooleanToVisibilityConverter}}" />
-				
-				<DockPanel Grid.Row="3"
-				           Visibility="{Binding IsChecked, ElementName=showAnalyzer, Converter={StaticResource BooleanToVisibilityConverter}}">
-					<Label DockPanel.Dock="Top">Analyzer</Label>
-					<tv:SharpTreeView Name="analyzerTree" ShowRoot="False" />
-				</DockPanel>
-			</Grid>
-		</Grid>
+		
+		<ad:DockingManager Name="dockManager">
+			<ad:ResizingPanel Orientation="Horizontal">
+				<ad:ResizingPanel Orientation="Vertical">
+					<ad:DockablePane ad:ResizingPanel.ResizeWidth="0.4*">
+						<ad:DockableContent Name="treeViewContent" Title="Classes">
+							<DockPanel>
+								<!-- Search bar -->
+								<controls:SearchBox DockPanel.Dock="Top" WatermarkText="Search" WatermarkColor="Gray" ToolTip="Search"
+									Text="{Binding FilterSettings.SearchTerm}" />
+								<!-- Tree View of assemblies and classes -->
+								<tv:SharpTreeView
+									Name="treeView"
+									SelectionChanged="TreeView_SelectionChanged"
+									ShowRoot="False"
+									AllowDropOrder="True"
+									AllowDrop="True" />
+							</DockPanel>
+						</ad:DockableContent>
+					</ad:DockablePane>
+				</ad:ResizingPanel>
+				<ad:ResizingPanel Orientation="Vertical">
+					<ad:DocumentPane Name="documentPane">
+					</ad:DocumentPane>
+				</ad:ResizingPanel>
+				<ad:ResizingPanel Orientation="Vertical">
+					<ad:DockablePane ad:ResizingPanel.ResizeWidth="0.2*">
+						<ad:DockableContent Name="analyzerContent" Title="Analyzer">
+							<tv:SharpTreeView Name="analyzerTree" ShowRoot="False" />
+						</ad:DockableContent>
+					</ad:DockablePane>
+				</ad:ResizingPanel>
+			</ad:ResizingPanel>
+		</ad:DockingManager>
 	</DockPanel>
 </Window>
