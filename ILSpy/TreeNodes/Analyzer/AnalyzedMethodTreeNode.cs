@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Windows.Input;
 using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
@@ -47,7 +48,7 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		public override void ActivateItem(System.Windows.RoutedEventArgs e)
 		{
 			e.Handled = true;
-			MainWindow.Instance.JumpToReference(analyzedMethod);
+			MainWindow.Instance.JumpToReference(analyzedMethod, Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl));
 		}
 		
 		protected override void LoadChildren()

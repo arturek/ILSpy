@@ -101,7 +101,6 @@
 								<!-- Tree View of assemblies and classes -->
 								<tv:SharpTreeView
 									Name="treeView"
-									SelectionChanged="TreeView_SelectionChanged"
 									ShowRoot="False"
 									AllowDropOrder="True"
 									AllowDrop="True" />

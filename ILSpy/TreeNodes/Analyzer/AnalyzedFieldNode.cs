@@ -2,6 +2,7 @@
 // This code is distributed under MIT X11 license (for details please see \doc\license.txt)
 
 using System;
+using System.Windows.Input;
 using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
@@ -32,7 +33,7 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		public override void ActivateItem(System.Windows.RoutedEventArgs e)
 		{
 			e.Handled = true;
-			MainWindow.Instance.JumpToReference(analyzedField);
+			MainWindow.Instance.JumpToReference(analyzedField, newWindow: Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl));
 		}
 		
 		protected override void LoadChildren()

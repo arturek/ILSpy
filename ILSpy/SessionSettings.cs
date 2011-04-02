@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Windows;
@@ -52,6 +53,9 @@ namespace ICSharpCode.ILSpy
 			var layoutElement = doc.Element("Layout");
 			if(layoutElement != null)
 				this.DockManagerSettings = layoutElement.Elements().First();
+			
+			var componentsElement = doc.Element("Components") ?? new XElement("Components");
+			this.components = componentsElement.Elements().ToList();
 		}
 		
 		public event PropertyChangedEventHandler PropertyChanged;
@@ -73,6 +77,29 @@ namespace ICSharpCode.ILSpy
 		
 		public XElement DockManagerSettings;
 		
+		private List<XElement> components;
+		
+		public XElement GetSettings(XName name)
+		{
+			if (name == null)
+				throw new ArgumentNullException("name");
+			return this.components.FirstOrDefault(el => el.Name == name);
+		}
+		
+		public void SaveSettings(XElement settings)
+		{
+			if(settings == null)
+				throw new ArgumentNullException("settings");
+			
+			for (int i = 0; i < this.components.Count; i++) {
+				if(components[i].Name == settings.Name) {
+					components[i] = settings;
+					return;
+				}
+			}
+			components.Add(settings);
+		}
+		
 		public void Save()
 		{
 			XElement doc = new XElement("SessionSettings");
@@ -88,6 +115,8 @@ namespace ICSharpCode.ILSpy
 			if(this.DockManagerSettings != null){
 				doc.Add(new XElement("Layout", this.DockManagerSettings));
 			}
+			
+			doc.Add(new XElement("Components", this.components));
 			
 			ILSpySettings.SaveSettings(doc);
 		}

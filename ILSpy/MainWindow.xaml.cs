@@ -27,8 +27,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using System.Xml.Linq;
 
 using AvalonDock;
@@ -46,19 +48,18 @@ namespace ICSharpCode.ILSpy
 	/// <summary>
 	/// The main window of the application.
 	/// </summary>
-	partial class MainWindow : Window
+	[Export(typeof(IDocumentsManager))]
+	partial class MainWindow : Window, IDocumentsManager
 	{
-		NavigationHistory<Tuple<List<SharpTreeNode>, DecompilerTextViewState>> history =
-			new NavigationHistory<Tuple<List<SharpTreeNode>, DecompilerTextViewState>>();
 		ILSpySettings spySettings;
 		SessionSettings sessionSettings;
 		AssemblyListManager assemblyListManager;
 		AssemblyList assemblyList;
 		AssemblyListTreeNode assemblyListTreeNode;
-		
-		[Import]
-		DecompilerTextView decompilerTextView = null;
-		
+		TypesTreeView typesTreeView;
+		bool treeViewInitialized;
+		DecompilerDocument lastActiveDocument;
+				
 		static MainWindow instance;
 		
 		public static MainWindow Instance {
@@ -87,22 +88,25 @@ namespace ICSharpCode.ILSpy
 			
 			InitializeComponent();
 			App.CompositionContainer.ComposeParts(this);
-			documentPane.Items.Add(new DocumentContent{
-			                       Title = "Decompiler",
-			                       Content = decompilerTextView,
-			                       });
+			
+			this.typesTreeView = new MainWindow.TypesTreeView(this.treeView);
+			this.typesTreeView.SelectionChanged += delegate { DecompileSelectedNodes(null, newWindow: false, recordInHistory: false); };
 			
 			sessionSettings.FilterSettings.PropertyChanged += filterSettings_PropertyChanged;
 			
 			InitMainMenu();
 			InitToolbar();
 			
-			this.Loaded += new RoutedEventHandler(MainWindow_Loaded);
 			
-			this.dockManager.Loaded += delegate { 
+			this.LoadDocuments(sessionSettings.GetSettings("{uri://sharpdevelop.net/ilspy}OpenDocuments"));
+			
+			this.Loaded += new RoutedEventHandler(MainWindow_Loaded);
+
+			this.dockManager.Loaded += delegate {
 				if(sessionSettings.DockManagerSettings != null)
 				{
 					dockManager.RestoreLayout(sessionSettings.DockManagerSettings.CreateReader());
+					SheduleNextAction(ActivateVisibleDocuments);
 				}
 			 };
 		}
@@ -201,16 +205,59 @@ namespace ICSharpCode.ILSpy
 			}
 			if (assemblyList.GetAssemblies().Length == 0)
 				LoadInitialAssemblies();
+
+			treeViewInitialized = true;
+			ActivateVisibleDocuments();
 			
-			SharpTreeNode node = FindNodeByPath(sessionSettings.ActiveTreeViewPath, true);
-			if (node != null) {
-				SelectNode(node);
-				
-				// only if not showing the about page, perform the update check:
+			if(sessionSettings.ActiveTreeViewPath != null)
+			{
+				SharpTreeNode node = typesTreeView.FindNodeByPath(sessionSettings.ActiveTreeViewPath, true);
+				if (node != null) {
+					SelectNode(node, newWindow: false);
+					
+					// only if not showing the about page, perform the update check:
+					ShowMessageIfUpdatesAvailableAsync(spySettings);
+				} else {
+					var doc = OpenNewDocument();
+					doc.Title = "About";
+					AboutPage.Display(doc.DecompilerTextView);
+				}
+			} else
 				ShowMessageIfUpdatesAvailableAsync(spySettings);
-			} else {
-				AboutPage.Display(decompilerTextView);
+		}
+		
+		void ActivateVisibleDocuments()
+		{
+			Debug.WriteLine("Activating visible documents");
+			if(!treeViewInitialized)
+				return;
+			foreach (var doc in ListVisibleDocuments()) {
+				ActivateDocument(doc);
 			}
+		}
+		
+		void ActivateDocument(DecompilerDocument doc)
+		{
+			if (doc == null)
+				throw new ArgumentNullException("dd");
+		
+			lastActiveDocument = doc;			
+			if(!treeViewInitialized)
+				return;
+			
+			Debug.WriteLine(String.Format("Activating document {0}.", doc.Title));
+			if(!doc.Activate(CurrentLanguage)) {
+				Debug.WriteLine(String.Format("Document {0} failed to activate and will be closed.", doc.Title));
+				// Close document if none of previously selected nodes can be found now.
+				SheduleNextAction(() => doc.Document.Close());
+			}
+		}
+		
+		void SheduleNextAction(Action action)
+		{
+			if (action == null)
+				throw new ArgumentNullException("action");
+			this.Dispatcher.BeginInvoke(DispatcherPriority.Background, action);
 		}
 		
 		#region Update Check
@@ -244,15 +291,14 @@ namespace ICSharpCode.ILSpy
 		
 		void ShowAssemblyList(AssemblyList assemblyList)
 		{
-			history.Clear();
 			this.assemblyList = assemblyList;
 			
 			assemblyList.assemblies.CollectionChanged += assemblyList_Assemblies_CollectionChanged;
 			
 			assemblyListTreeNode = new AssemblyListTreeNode(assemblyList);
 			assemblyListTreeNode.FilterSettings = sessionSettings.FilterSettings.Clone();
-			assemblyListTreeNode.Select = node => SelectNode(node);
-			treeView.Root = assemblyListTreeNode;
+			assemblyListTreeNode.Select = node => SelectNode(node, newWindow: false);
+			this.typesTreeView.SetRootNodes(assemblyListTreeNode);
 			
 			if (assemblyList.ListName == AssemblyListManager.DefaultListName)
 				this.Title = "ILSpy";
@@ -262,9 +308,9 @@ namespace ICSharpCode.ILSpy
 
 		void assemblyList_Assemblies_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
 		{
-			if (e.OldItems != null)
-				foreach (LoadedAssembly asm in e.OldItems)
-					history.RemoveAll(n => n.Item1.Any(nd => nd.AncestorsAndSelf().OfType<AssemblyTreeNode>().Any(a => a.LoadedAssembly == asm)));
+//			if (e.OldItems != null)
+//				foreach (LoadedAssembly asm in e.OldItems)
+//					history.RemoveAll(n => n.Item1.Any(nd => nd.AncestorsAndSelf().OfType<AssemblyTreeNode>().Any(a => a.LoadedAssembly == asm)));
 		}
 		
 		void LoadInitialAssemblies()
@@ -294,7 +340,7 @@ namespace ICSharpCode.ILSpy
 		{
 			RefreshTreeViewFilter();
 			if (e.PropertyName == "Language") {
-				DecompileSelectedNodes();
+				DecompileSelectedNodes(null, newWindow: false, recordInHistory: false);
 			}
 		}
 		
@@ -316,70 +362,38 @@ namespace ICSharpCode.ILSpy
 		}
 		
 		#region Node Selection
-		internal void SelectNode(SharpTreeNode obj, bool recordNavigationInHistory = true)
+		internal void SelectNode(SharpTreeNode obj, bool newWindow, bool recordNavigationInHistory = true)
 		{
 			if (obj != null) {
-				SharpTreeNode oldNode = treeView.SelectedItem as SharpTreeNode;
-				if (oldNode != null && recordNavigationInHistory)
-					history.Record(Tuple.Create(treeView.SelectedItems.OfType<SharpTreeNode>().ToList(), decompilerTextView.GetState()));
-				// Set both the selection and focus to ensure that keyboard navigation works as expected.
-				treeView.FocusNode(obj);
-				treeView.SelectedItem = obj;
+				DecompileSelectedNodes(new List<SharpTreeNode>{ obj }, newWindow, recordNavigationInHistory);
 			}
 		}
 		
-		/// <summary>
-		/// Retrieves a node using the .ToString() representations of its ancestors.
-		/// </summary>
-		SharpTreeNode FindNodeByPath(string[] path, bool returnBestMatch)
+		internal void SelectNode(SharpTreeNode obj, bool newWindow, DecompilerTextView sourceTextView, bool recordNavigationInHistory = true)
 		{
-			if (path == null)
-				return null;
-			SharpTreeNode node = treeView.Root;
-			SharpTreeNode bestMatch = node;
-			foreach (var element in path) {
-				if (node == null)
-					break;
-				bestMatch = node;
-				node.EnsureLazyChildren();
-				node = node.Children.FirstOrDefault(c => c.ToString() == element);
+			if (obj != null) {
+				DecompilerDocument doc = null;
+				if(!newWindow)
+					doc = sourceTextView != null ? ListDocuments().FirstOrDefault(d => d.DecompilerTextView == sourceTextView) : CurrentOrDefaultDocument;
+				
+				DecompileSelectedNodes(new List<SharpTreeNode>{ obj }, doc, recordNavigationInHistory);
 			}
-			if (returnBestMatch)
-				return node ?? bestMatch;
-			else
-				return node;
 		}
-		
-		/// <summary>
-		/// Gets the .ToString() representation of the node's ancestors.
-		/// </summary>
-		string[] GetPathForNode(SharpTreeNode node)
-		{
-			if (node == null)
-				return null;
-			List<string> path = new List<string>();
-			while (node.Parent != null) {
-				path.Add(node.ToString());
-				node = node.Parent;
-			}
-			path.Reverse();
-			return path.ToArray();
-		}
-		
-		public void JumpToReference(object reference)
+
+		public void JumpToReference(object reference, bool newWindow, DecompilerTextView sourceTextView = null)
 		{
 			if (reference is TypeReference) {
-				SelectNode(assemblyListTreeNode.FindTypeNode(((TypeReference)reference).Resolve()));
+				SelectNode(assemblyListTreeNode.FindTypeNode(((TypeReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is MethodReference) {
-				SelectNode(assemblyListTreeNode.FindMethodNode(((MethodReference)reference).Resolve()));
+				SelectNode(assemblyListTreeNode.FindMethodNode(((MethodReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is FieldReference) {
-				SelectNode(assemblyListTreeNode.FindFieldNode(((FieldReference)reference).Resolve()));
+				SelectNode(assemblyListTreeNode.FindFieldNode(((FieldReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is PropertyReference) {
-				SelectNode(assemblyListTreeNode.FindPropertyNode(((PropertyReference)reference).Resolve()));
+				SelectNode(assemblyListTreeNode.FindPropertyNode(((PropertyReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is EventReference) {
-				SelectNode(assemblyListTreeNode.FindEventNode(((EventReference)reference).Resolve()));
+				SelectNode(assemblyListTreeNode.FindEventNode(((EventReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is AssemblyDefinition) {
-				SelectNode(assemblyListTreeNode.FindAssemblyNode((AssemblyDefinition)reference));
+				SelectNode(assemblyListTreeNode.FindAssemblyNode((AssemblyDefinition)reference), newWindow, sourceTextView);
 			} else if (reference is Mono.Cecil.Cil.OpCode) {
 				string link = "http://msdn.microsoft.com/library/system.reflection.emit.opcodes." + ((Mono.Cecil.Cil.OpCode)reference).Code.ToString().ToLowerInvariant() + ".aspx";
 				try {
@@ -389,6 +403,7 @@ namespace ICSharpCode.ILSpy
 				}
 			}
 		}
+		
 		#endregion
 		
 		#region Open/Refresh
@@ -427,51 +442,57 @@ namespace ICSharpCode.ILSpy
 		void RefreshCommandExecuted(object sender, ExecutedRoutedEventArgs e)
 		{
 			e.Handled = true;
-			var path = GetPathForNode(treeView.SelectedItem as SharpTreeNode);
 			ShowAssemblyList(assemblyListManager.LoadList(ILSpySettings.Load(), assemblyList.ListName));
-			SelectNode(FindNodeByPath(path, true));
+
+			foreach (var doc in ListDocuments()) {
+				doc.ResetDecompilationState();
+			}
+			ActivateVisibleDocuments();
 		}
 		#endregion
 		
-		#region Decompile (TreeView_SelectionChanged)
-		void TreeView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+		#region Decompile
+		private void DecompileSelectedNodes(List<SharpTreeNode> nodes, bool newWindow, bool recordInHistory, DecompilerTextViewState state = null)
 		{
-			DecompileSelectedNodes();
+			var doc = newWindow ? null : CurrentDocument;
+			DecompileSelectedNodes(nodes, newWindow ? null : CurrentDocument, recordInHistory, state);
 		}
 
-		private bool ignoreDecompilationRequests;
-
-		private void DecompileSelectedNodes(DecompilerTextViewState state = null)
+		private void DecompileSelectedNodes(List<SharpTreeNode> nodes, DecompilerDocument doc, bool recordInHistory, DecompilerTextViewState state = null)
 		{
-			if (ignoreDecompilationRequests)
-				return;
-
-			if (treeView.SelectedItems.Count == 1) {
-				ILSpyTreeNode node = treeView.SelectedItem as ILSpyTreeNode;
-				if (node != null && node.View(decompilerTextView))
-					return;
+			if (doc == null) {
+				doc = OpenNewDocument();
+				recordInHistory = false;
 			}
-			decompilerTextView.Decompile(this.CurrentLanguage, this.SelectedNodes, new DecompilationOptions() { TextViewState = state });
+						
+			IEnumerable<SharpTreeNode> sharpTreeNodes = null;
+			if(nodes != null) {
+				typesTreeView.SilentlySelectNodes(nodes);
+				sharpTreeNodes = nodes.OfType<SharpTreeNode>();
+			} else {
+				sharpTreeNodes = this.typesTreeView.GetSelectedNodes();
+			}
+
+			doc.Decompile(this.CurrentLanguage, sharpTreeNodes, new DecompilationOptions() { TextViewState = state }, addToHistory: recordInHistory);
 		}
 		
 		void SaveCommandExecuted(object sender, ExecutedRoutedEventArgs e)
 		{
+			if(this.CurrentDocument == null)
+				return;
+			
 			if (this.SelectedNodes.Count() == 1) {
-				if (this.SelectedNodes.Single().Save(this.TextView))
+				if (this.SelectedNodes.Single().Save(this.CurrentDocument.DecompilerTextView))
 					return;
 			}
-			this.TextView.SaveToDisk(this.CurrentLanguage,
-			                         this.SelectedNodes,
-			                         new DecompilationOptions() { FullDecompilation = true });
+			this.CurrentDocument.DecompilerTextView.SaveToDisk(this.CurrentLanguage,
+										                         this.SelectedNodes,
+										                         new DecompilationOptions() { FullDecompilation = true });
 		}
 		
 		public void RefreshDecompiledView()
 		{
-			DecompileSelectedNodes();
-		}
-		
-		public DecompilerTextView TextView {
-			get { return decompilerTextView; }
+			DecompileSelectedNodes(null, newWindow: false, recordInHistory: false);
 		}
 		
 		public Language CurrentLanguage {
@@ -491,50 +512,58 @@ namespace ICSharpCode.ILSpy
 		void BackCommandCanExecute(object sender, CanExecuteRoutedEventArgs e)
 		{
 			e.Handled = true;
-			e.CanExecute = history.CanNavigateBack;
+			var ds = this.CurrentDocument;
+			e.CanExecute = ds != null && ds.History.CanNavigateBack;
 		}
 		
 		void BackCommandExecuted(object sender, ExecutedRoutedEventArgs e)
 		{
-			if (history.CanNavigateBack) {
+			if (NavigateHistory(forward: false))
 				e.Handled = true;
-				NavigateHistory(false);
-			}
 		}
 		
 		void ForwardCommandCanExecute(object sender, CanExecuteRoutedEventArgs e)
 		{
 			e.Handled = true;
-			e.CanExecute = history.CanNavigateForward;
+			var ds = this.CurrentDocument;
+			e.CanExecute = ds != null && ds.History.CanNavigateForward;
 		}
 		
 		void ForwardCommandExecuted(object sender, ExecutedRoutedEventArgs e)
 		{
-			if (history.CanNavigateForward) {
+			if (NavigateHistory(forward: true))
 				e.Handled = true;
-				NavigateHistory(true);
-			}
 		}
 
-		void NavigateHistory(bool forward)
+		bool NavigateHistory(bool forward)
 		{
-			var currentSelection = treeView.SelectedItems.OfType<SharpTreeNode>().ToList();
-			var state = decompilerTextView.GetState();
-			var combinedState = Tuple.Create(currentSelection, state);
-			var newState = forward ? history.GoForward(combinedState) : history.GoBack(combinedState);
-
-			this.ignoreDecompilationRequests = true;
-			treeView.SelectedItems.Clear();
-			foreach (var node in newState.Item1)
-			{
-				treeView.SelectedItems.Add(node);
+			var session = this.CurrentDocument;
+			if(session == null)
+				return false;
+			var history = session.History;
+			
+			var historyEntry = new NavigationHistoryEntry(typesTreeView.GetSelectedNodesPaths(), session.DecompilerTextView.GetState());
+			
+			while(forward ? history.CanNavigateForward : history.CanNavigateBack) {
+				var newState = forward ? history.GoForward(historyEntry) : history.GoBack(historyEntry);
+				
+				var treeNodes = newState.SelectedNodes.Select(nd => typesTreeView.FindNodeByPath(nd, false)).Where(tn => tn != null).ToList();
+				if(treeNodes.Count != 0) {
+					DecompileSelectedNodes(treeNodes, newWindow: false, recordInHistory: false);
+					return true;
+				}
+				historyEntry = null;	// Do not store it again in the history.
 			}
-			if (newState.Item1.Any())
-				treeView.ScrollIntoView(newState.Item1.First());
-			ignoreDecompilationRequests = false;
-			DecompileSelectedNodes(newState.Item2);
+			
+			// Remove state saved by the first navigation attempt if none succeeded.
+			if(historyEntry == null)
+				if(forward)
+					history.GoBack(null);
+				else
+					history.GoForward(null);
+			return false;
 		}
-
+		
 		#endregion
 		
 		#region Analyzer
@@ -563,13 +592,17 @@ namespace ICSharpCode.ILSpy
 		{
 			base.OnClosing(e);
 			sessionSettings.ActiveAssemblyList = assemblyList.ListName;
-			sessionSettings.ActiveTreeViewPath = GetPathForNode(treeView.SelectedItem as SharpTreeNode);
+			sessionSettings.ActiveTreeViewPath = typesTreeView.GetPathForNode(treeView.SelectedItem as SharpTreeNode);
 			sessionSettings.WindowBounds = this.RestoreBounds;
+
+			// Prepare saving sessions and layout (they both need correct document names)
+			PrepareSavingDocuments();
+			sessionSettings.SaveSettings(SaveDocuments("{uri://sharpdevelop.net/ilspy}OpenDocuments"));
 			var xDoc= new XDocument();
 			using(var writer = xDoc.CreateWriter())
 				dockManager.SaveLayout(writer);
 			sessionSettings.DockManagerSettings = xDoc.Root;
-			
+			sessionSettings.ActiveTreeViewPath = null;
 			sessionSettings.Save();
 		}
 		
@@ -577,5 +610,377 @@ namespace ICSharpCode.ILSpy
 		{
 			analyzerContent.Show();
 		}
+		
+		#region DecompilerDocuments
+		DecompilerDocument CurrentDocument
+		{
+			get
+			{
+				var doc = this.dockManager.ActiveDocument;
+				if(doc != null)
+					return doc.Tag as DecompilerDocument;
+				else
+					return null;
+			}
+		}
+		
+		DecompilerDocument CurrentOrDefaultDocument
+		{
+			get
+			{
+				var doc = CurrentDocument;
+				if(doc == null) {
+					if(ListDocuments().Any(d => d == lastActiveDocument))
+						doc = lastActiveDocument;
+				}
+				return doc;
+			}
+		}
+		
+		DecompilerDocument OpenNewDocument(bool hidden = false)
+		{
+			var d = new DecompilerDocument(this.typesTreeView);
+			if(hidden)
+				this.documentPane.Items.Add(d.Document);
+			else {
+				d.Document.Show(dockManager);
+				d.Document.Activate();
+			}
+			d.Document.IsActiveDocumentChanged += delegate { SheduleNextAction(() => ActivateDocument(d)); };
+			return d;
+		}
+		
+		IEnumerable<DecompilerDocument> ListDocuments()
+		{
+			return this.dockManager.Documents
+				.Select(d => d.Tag as DecompilerDocument)
+				.Where(ds => ds != null);
+		}
+		
+		IEnumerable<DecompilerDocument> ListVisibleDocuments()
+		{
+			return ListDocuments()
+				.Where(d => Selector.GetIsSelected(d.Document));
+		}
+		
+		void LoadDocuments(XElement el)
+		{
+			foreach (var sessionEl in el.Elements("Document")) {
+				var ss = OpenNewDocument(hidden: true);
+				ss.Load(sessionEl);
+			}
+		}
+
+		void PrepareSavingDocuments()
+		{
+			int n = 0;
+			foreach (var doc in ListDocuments()) {
+				if(doc.SelectedNodes.Count > 0)
+					doc.Document.Name = "Doc" + n++;
+				else
+					doc.Document.Name = null;
+			}
+		}
+
+		XElement SaveDocuments(XName name)
+		{
+			var sessions = ListDocuments()
+				.Where(doc => doc.Document.Name != null)
+				.Select(ss => ss.Save("Document"));
+			
+			return new XElement(name, sessions);
+		}
+		
+		class NavigationHistoryEntry
+		{
+			public DecompilerTextViewState TextViewState;
+			public List<string[]> SelectedNodes;
+			
+			public NavigationHistoryEntry(List<string[]> selectedNodes, DecompilerTextViewState textViewState)
+			{
+				this.SelectedNodes = selectedNodes;
+				TextViewState = textViewState;
+			}
+			
+			public void Load(XElement el)
+			{
+				
+			}
+			
+			public XElement Save(XName name)
+			{
+				return null;
+			}
+		}
+
+		class DecompilerDocument
+		{
+			public readonly NavigationHistory<NavigationHistoryEntry> History =
+				new NavigationHistory<NavigationHistoryEntry>();
+			public readonly DecompilerTextView DecompilerTextView;
+			public readonly DocumentContent Document;
+			public readonly ReadOnlyCollection<string[]> SelectedNodes;
+			
+			private List<string[]> selectedNodes;
+			private TypesTreeView typesTreeView;
+			private Language language;
+			private bool decompiled;
+			
+			public DecompilerDocument(TypesTreeView typesTreeView)
+			{
+				if (typesTreeView == null)
+					throw new ArgumentNullException("typesTreeView");
+				this.typesTreeView = typesTreeView;
+				this.selectedNodes = new List<string[]>();
+				this.SelectedNodes = new ReadOnlyCollection<string[]>(this.selectedNodes);
+				this.DecompilerTextView = App.CompositionContainer.GetExportedValue<DecompilerTextView>();
+				this.Document = new DocumentContentWithActivation {
+					Title = "Decompiler",
+					Content = this.DecompilerTextView,
+					Tag = this,
+				};
+			}
+			
+			public string Title
+			{
+				get
+				{
+					return this.Document.Title;
+				}
+				set
+				{
+					this.Document.Title = value;
+				}
+			}
+			
+			public void Decompile(Language language, IEnumerable<SharpTreeNode> treeNodes, DecompilationOptions options, bool addToHistory)
+			{
+				var selectedTreeNodes = treeNodes == null ? new List<ILSpyTreeNode>() : treeNodes.OfType<ILSpyTreeNode>().ToList();
+
+				if(addToHistory && (this.selectedNodes.Count > 0))
+					this.History.Record(new NavigationHistoryEntry(this.SelectedNodes.ToList(), this.DecompilerTextView.GetState()));
+				this.selectedNodes.Clear();
+				this.selectedNodes.AddRange(selectedTreeNodes.Select(nd => typesTreeView.GetPathForNode(nd)));
+
+				if (selectedTreeNodes.Count == 1) {
+					if (selectedTreeNodes[0].View(this.DecompilerTextView)) {
+						this.Title = selectedTreeNodes[0].Text.ToString();
+						return;
+					}
+				}
+				
+				if(selectedTreeNodes.Count > 1)
+					this.Title = String.Format("{0} (+{1} more)", selectedTreeNodes[0].Text, selectedNodes.Count - 1);
+				else if(selectedTreeNodes.Count == 1)
+					this.Title = selectedTreeNodes[0].Text.ToString();
+				else
+					this.Title = "(none)";
+				
+				this.DecompilerTextView.Decompile(language, selectedTreeNodes, options ?? new DecompilationOptions());
+			}
+			
+			public bool Activate(Language language)
+			{
+				var treeNodes = this.selectedNodes
+					.Select(nd => typesTreeView.FindNodeByPath(nd, returnBestMatch: false))
+					.Where(nd => nd != null)
+					.ToList();
+				if(treeNodes.Count == 0 && this.selectedNodes.Count > 0)
+					return false;
+				this.typesTreeView.SilentlySelectNodes(treeNodes);
+				if(!this.decompiled || language != this.language)
+					Decompile(language, treeNodes, null, addToHistory: false);
+				this.language = language;
+				this.decompiled = true;
+				return true;
+			}
+			
+			public void ResetDecompilationState()
+			{
+				this.decompiled = false;
+			}
+			
+			public void Load(XElement el)
+			{
+				this.Title = (string)el.Attribute("title");
+				this.Document.Name = (string)el.Attribute("name");
+				foreach (var nodeEl in el.Elements("node")) {
+					this.selectedNodes.Add(LoadNode(nodeEl));
+				}
+			}
+
+			public XElement Save(XName name)
+			{
+				return new XElement(name,
+				                    new XAttribute("name", this.Document.Name),
+				                    new XAttribute("title", this.Title),
+				                    this.SelectedNodes.Select(n => SaveNode(n, "node")));
+			}
+			
+			XElement SaveNode(string[] path, XName name)
+			{
+				if(!path.Any(p => p.Contains("/")))
+					return new XElement(name, new XAttribute("path", String.Join("/", path)));
+				else
+					return new XElement(name, path.Select(p => new XElement("p", p)));
+			}
+
+			string[] LoadNode(XElement el)
+			{
+				string path = (string)el.Attribute("path");
+				if(path != null)
+					return path.Split('/');
+				else
+					return el.Elements("p").Select(p => (string)p).ToArray();
+			}
+		}
+	
+		sealed class TypesTreeView
+		{
+			private SharpTreeView treeView;
+			private bool ignoreSelectionChanges;
+			
+			public event SelectionChangedEventHandler SelectionChanged;
+			
+			public TypesTreeView(SharpTreeView treeView)
+			{
+				if (treeView == null)
+					throw new ArgumentNullException("treeView");
+				this.treeView = treeView;
+				this.treeView.SelectionChanged += (sender, e) => OnSelectionChanged(e);
+			}
+
+			void OnSelectionChanged(SelectionChangedEventArgs e)
+			{
+				if(this.ignoreSelectionChanges)
+					return;
+				
+				var handler = this.SelectionChanged;
+				if(handler != null)
+					handler(this, e);
+			}
+
+			/// <summary>
+			/// Sets root node of the types tree without sending notification about selection changes.
+			/// </summary>
+			/// <param name="rootNode">New root node.</param>
+			/// <remarks>The caller is reponsible for updating views.</remarks>
+			public void SetRootNodes(SharpTreeNode rootNode)
+			{
+				ignoreSelectionChanges = true;
+				this.treeView.Root = rootNode;
+				ignoreSelectionChanges = false;
+			}
+			
+			/// <summary>
+			/// Retrieves a node using the .ToString() representations of its ancestors.
+			/// </summary>
+			public SharpTreeNode FindNodeByPath(string[] path, bool returnBestMatch)
+			{
+				if (path == null)
+					return null;
+				SharpTreeNode node = treeView.Root;
+				SharpTreeNode bestMatch = node;
+				foreach (var element in path) {
+					if (node == null)
+						break;
+					bestMatch = node;
+					node.EnsureLazyChildren();
+					node = node.Children.FirstOrDefault(c => c.ToString() == element);
+				}
+				if (returnBestMatch)
+					return node ?? bestMatch;
+				else
+					return node;
+			}
+			
+			/// <summary>
+			/// Gets the .ToString() representation of the node's ancestors.
+			/// </summary>
+			public string[] GetPathForNode(SharpTreeNode node)
+			{
+				if (node == null)
+					return null;
+				List<string> path = new List<string>();
+				while (node.Parent != null) {
+					path.Add(node.ToString());
+					node = node.Parent;
+				}
+				path.Reverse();
+				return path.ToArray();
+			}
+			
+			public IEnumerable<SharpTreeNode> GetSelectedNodes()
+			{
+				return treeView
+					.SelectedItems
+					.OfType<SharpTreeNode>();
+			}
+			
+			public List<string[]> GetSelectedNodesPaths()
+			{
+				return treeView
+					.SelectedItems
+					.OfType<SharpTreeNode>()
+					.Select(nd => GetPathForNode(nd))
+					.ToList();
+			}
+			
+			/// <summary>
+			/// Selects nodes without triggering decompilation.
+			/// </summary>
+			/// <param name="nodes">The nodes to select</param>
+			public void SilentlySelectNodes(List<SharpTreeNode> nodes)
+			{
+				this.ignoreSelectionChanges = true;
+				treeView.SelectedItems.Clear();
+				foreach (var node in nodes)
+				{
+					treeView.SelectedItems.Add(node);
+				}
+				if (nodes.Any()) {
+					treeView.FocusNode(nodes.First());
+					treeView.ScrollIntoView(nodes.First());
+				}
+				this.ignoreSelectionChanges = false;
+			}
+			
+		}
+		
+		
+		/// <summary>
+		///  The document content class that will activate itself after any mouse click.
+		/// </summary>
+		/// <remarks>
+		/// This is a workaround for a problem with clicking on a reference in inactive document.
+		/// </remarks>
+		class DocumentContentWithActivation : DocumentContent
+		{
+			protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
+			{
+				Activate();
+			}
+		}
+		
+		#endregion
+		
+		DecompilerTextView IDocumentsManager.OpenTextView(string title)
+		{
+			Debug.WriteLine(String.Format("Creating TextView document with title '{0}'", title));
+			var textView = App.CompositionContainer.GetExportedValue<DecompilerTextView>();
+			var d = new DocumentContent
+			{
+				Content = textView,
+				Title = title,
+			};
+			d.Show(this.dockManager);
+			d.Activate();
+			return textView;
+		}
+	}
+	
+	public interface IDocumentsManager
+	{
+		DecompilerTextView OpenTextView(string title);
 	}
 }

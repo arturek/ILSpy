@@ -50,7 +50,7 @@ namespace ICSharpCode.ILSpy.TextView
 	/// Manages the TextEditor showing the decompiled code.
 	/// Contains all the threading logic that makes the decompiler work in the background.
 	/// </summary>
-	[Export, PartCreationPolicy(CreationPolicy.Shared)]
+	[Export, PartCreationPolicy(CreationPolicy.NonShared)]
 	public sealed partial class DecompilerTextView : UserControl
 	{
 		readonly ReferenceElementGenerator referenceElementGenerator;
@@ -467,7 +467,7 @@ namespace ICSharpCode.ILSpy.TextView
 		/// <summary>
 		/// Jumps to the definition referred to by the <see cref="ReferenceSegment"/>.
 		/// </summary>
-		internal void JumpToReference(ReferenceSegment referenceSegment)
+		internal void JumpToReference(ReferenceSegment referenceSegment, bool openInNewWindow)
 		{
 			object reference = referenceSegment.Reference;
 			if (definitionLookup != null) {
@@ -483,7 +483,7 @@ namespace ICSharpCode.ILSpy.TextView
 					return;
 				}
 			}
-			MainWindow.Instance.JumpToReference(reference);
+			MainWindow.Instance.JumpToReference(reference, openInNewWindow, this);
 		}
 		
 		/// <summary>

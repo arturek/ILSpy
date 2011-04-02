@@ -25,11 +25,12 @@ namespace ICSharpCode.ILSpy
 	sealed class AboutPage : SimpleCommand
 	{
 		[Import]
-		DecompilerTextView decompilerTextView = null;
+		IDocumentsManager documentManager = null;
 		
 		public override void Execute(object parameter)
 		{
-			Display(decompilerTextView);
+			var textView = documentManager.OpenTextView("About ILSpy");
+			Display(textView);
 		}
 		
 		static readonly Uri UpdateUrl = new Uri("http://www.ilspy.net/updates.xml");
