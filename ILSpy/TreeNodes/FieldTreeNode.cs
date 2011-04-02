@@ -17,9 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
-using System.Windows.Controls;
 using ICSharpCode.Decompiler;
-using ICSharpCode.ILSpy.TreeNodes.Analyzer;
 using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy.TreeNodes
@@ -27,7 +25,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 	/// <summary>
 	/// Represents a field in the TreeView.
 	/// </summary>
-	public sealed class FieldTreeNode : ILSpyTreeNode
+	public sealed class FieldTreeNode : ILSpyTreeNode, IMemberTreeNode
 	{
 		readonly FieldDefinition field;
 		
@@ -71,15 +69,8 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			language.DecompileField(field, output, options);
 		}
 		
-		public override System.Windows.Controls.ContextMenu GetContextMenu()
-		{
-			ContextMenu menu = new ContextMenu();
-			MenuItem item = new MenuItem() { Header = "Analyze", Icon = new Image() { Source = Images.Search } };
-			item.Click += delegate { MainWindow.Instance.AddToAnalyzer(new AnalyzedFieldNode(field)); };
-			
-			menu.Items.Add(item);
-			
-			return menu;
+		MemberReference IMemberTreeNode.Member {
+			get { return field; }
 		}
 	}
 }

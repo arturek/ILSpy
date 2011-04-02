@@ -27,7 +27,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 	/// <summary>
 	/// Represents a property in the TreeView.
 	/// </summary>
-	public sealed class PropertyTreeNode : ILSpyTreeNode
+	public sealed class PropertyTreeNode : ILSpyTreeNode, IMemberTreeNode
 	{
 		readonly PropertyDefinition property;
 		readonly bool isIndexer;
@@ -85,19 +85,9 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		{
 			language.DecompileProperty(property, output, options);
 		}
-
-		public override System.Windows.Controls.ContextMenu GetContextMenu()
-		{
-			if (Analyzer.AnalyzedPropertyOverridesTreeNode.CanShowAnalyzer(property)) {
-				ContextMenu menu = new ContextMenu();
-				MenuItem item = new MenuItem() { Header = "Analyze", Icon = new Image() { Source = Images.Search } };
-				item.Click += delegate { MainWindow.Instance.AddToAnalyzer(new Analyzer.AnalyzedPropertyTreeNode(property)); };
-
-				menu.Items.Add(item);
-
-				return menu;
-			} else
-				return base.GetContextMenu();
+		
+		MemberReference IMemberTreeNode.Member {
+			get { return property; }
 		}
 	}
 }

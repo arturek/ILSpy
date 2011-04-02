@@ -22,7 +22,7 @@ using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 {
-	class AnalyzedMethodTreeNode : AnalyzerTreeNode
+	class AnalyzedMethodTreeNode : AnalyzerTreeNode, IMemberTreeNode
 	{
 		MethodDefinition analyzedMethod;
 		string prefix;
@@ -58,6 +58,10 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 			this.Children.Add(new AnalyzedMethodUsedByTreeNode(analyzedMethod));
 			if (AnalyzerMethodOverridesTreeNode.CanShowAnalyzer(analyzedMethod))
 				this.Children.Add(new AnalyzerMethodOverridesTreeNode(analyzedMethod));
+		}
+		
+		MemberReference IMemberTreeNode.Member {
+			get { return analyzedMethod; }
 		}
 	}
 }

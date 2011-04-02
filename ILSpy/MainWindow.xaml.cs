@@ -23,19 +23,19 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
 
 using AvalonDock;
-using ICSharpCode.Decompiler;
-using ICSharpCode.Decompiler.FlowAnalysis;
 using ICSharpCode.ILSpy.TextView;
 using ICSharpCode.ILSpy.TreeNodes;
 using ICSharpCode.ILSpy.TreeNodes.Analyzer;
@@ -59,6 +59,7 @@ namespace ICSharpCode.ILSpy
 		TypesTreeView typesTreeView;
 		bool treeViewInitialized;
 		DecompilerDocument lastActiveDocument;
+		DecompilerDocument navigateToDocument;
 				
 		static MainWindow instance;
 		
@@ -96,6 +97,8 @@ namespace ICSharpCode.ILSpy
 			
 			InitMainMenu();
 			InitToolbar();
+			ContextMenuProvider.Add(treeView);
+			ContextMenuProvider.Add(analyzerTree);
 			
 			
 			this.LoadDocuments(sessionSettings.GetSettings("{uri://sharpdevelop.net/ilspy}OpenDocuments"));
@@ -188,6 +191,80 @@ namespace ICSharpCode.ILSpy
 		}
 		#endregion
 		
+		#region Message Hook
+		protected override void OnSourceInitialized(EventArgs e)
+		{
+			base.OnSourceInitialized(e);
+			HwndSource source = PresentationSource.FromVisual(this) as HwndSource;;
+			if (source != null) {
+				source.AddHook(WndProc);
+			}
+		}
+		
+		unsafe IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+		{
+			if (msg == NativeMethods.WM_COPYDATA) {
+				CopyDataStruct* copyData = (CopyDataStruct*)lParam;
+				string data = new string((char*)copyData->Buffer, 0, copyData->Size / sizeof(char));
+				if (data.StartsWith("ILSpy:\r\n", StringComparison.Ordinal)) {
+					data = data.Substring(8);
+					List<string> lines = new List<string>();
+					using (StringReader r = new StringReader(data)) {
+						string line;
+						while ((line = r.ReadLine()) != null)
+							lines.Add(line);
+					}
+					var args = new CommandLineArguments(lines);
+					if (HandleCommandLineArguments(args)) {
+						HandleCommandLineArgumentsAfterShowList(args);
+						handled = true;
+						return (IntPtr)1;
+					}
+				}
+			}
+			return IntPtr.Zero;
+		}
+		#endregion
+		
+		List<LoadedAssembly> commandLineLoadedAssemblies = new List<LoadedAssembly>();
+		
+		bool HandleCommandLineArguments(CommandLineArguments args)
+		{
+			foreach (string file in args.AssembliesToLoad) {
+				commandLineLoadedAssemblies.Add(assemblyList.OpenAssembly(file));
+			}
+			if (args.Language != null)
+				sessionSettings.FilterSettings.Language = Languages.GetLanguage(args.Language);
+			return true;
+		}
+		
+		void HandleCommandLineArgumentsAfterShowList(CommandLineArguments args)
+		{
+			if (args.NavigateTo != null) {
+				bool found = false;
+				foreach (LoadedAssembly asm in commandLineLoadedAssemblies) {
+					AssemblyDefinition def = asm.AssemblyDefinition;
+					if (def != null) {
+						MemberReference mr = XmlDocKeyProvider.FindMemberByKey(def.MainModule, args.NavigateTo);
+						if (mr != null) {
+							found = true;
+							navigateToDocument = JumpToReferenceImpl(mr, true);
+							break;
+						}
+					}
+				}
+				if (!found) {
+					AvalonEditTextOutput output = new AvalonEditTextOutput();
+					output.Write("Cannot find " + args.NavigateTo);
+					navigateToDocument = OpenNewDocument();
+					navigateToDocument.UseForExternalContent();
+					navigateToDocument.Title = "Navigation failed";
+					navigateToDocument.DecompilerTextView.Show(output);
+				}
+			}
+			commandLineLoadedAssemblies.Clear(); // clear references once we don't need them anymore
+		}
+		
 		void MainWindow_Loaded(object sender, RoutedEventArgs e)
 		{
 			ILSpySettings spySettings = this.spySettings;
@@ -197,18 +274,22 @@ namespace ICSharpCode.ILSpy
 			// This makes the UI come up a bit faster.
 			this.assemblyList = assemblyListManager.LoadList(spySettings, sessionSettings.ActiveAssemblyList);
 			
+			HandleCommandLineArguments(App.CommandLineArguments);
+			
+			if (assemblyList.GetAssemblies().Length == 0
+			    && assemblyList.ListName == AssemblyListManager.DefaultListName)
+			{
+				LoadInitialAssemblies();
+			}
+
 			ShowAssemblyList(this.assemblyList);
 			
-			string[] args = Environment.GetCommandLineArgs();
-			for (int i = 1; i < args.Length; i++) {
-				assemblyList.OpenAssembly(args[i]);
-			}
-			if (assemblyList.GetAssemblies().Length == 0)
-				LoadInitialAssemblies();
-
 			treeViewInitialized = true;
 			ActivateVisibleDocuments();
 			
+			HandleCommandLineArgumentsAfterShowList(App.CommandLineArguments);
+
+			// if (App.CommandLineArguments.NavigateTo == null)
 			if(sessionSettings.ActiveTreeViewPath != null)
 			{
 				SharpTreeNode node = typesTreeView.FindNodeByPath(sessionSettings.ActiveTreeViewPath, true);
@@ -233,6 +314,9 @@ namespace ICSharpCode.ILSpy
 				return;
 			foreach (var doc in ListVisibleDocuments()) {
 				ActivateDocument(doc);
+			}
+			if (navigateToDocument != null) {
+				navigateToDocument.Document.Activate();
 			}
 		}
 		
@@ -369,31 +453,37 @@ namespace ICSharpCode.ILSpy
 			}
 		}
 		
-		internal void SelectNode(SharpTreeNode obj, bool newWindow, DecompilerTextView sourceTextView, bool recordNavigationInHistory = true)
+		DecompilerDocument SelectNode(SharpTreeNode obj, bool newWindow, DecompilerTextView sourceTextView, bool recordNavigationInHistory = true)
 		{
 			if (obj != null) {
 				DecompilerDocument doc = null;
 				if(!newWindow)
 					doc = sourceTextView != null ? ListDocuments().FirstOrDefault(d => d.DecompilerTextView == sourceTextView) : CurrentOrDefaultDocument;
 				
-				DecompileSelectedNodes(new List<SharpTreeNode>{ obj }, doc, recordNavigationInHistory);
-			}
+				return DecompileSelectedNodes(new List<SharpTreeNode>{ obj }, doc, recordNavigationInHistory);
+			} else
+				return null;
 		}
 
 		public void JumpToReference(object reference, bool newWindow, DecompilerTextView sourceTextView = null)
 		{
+			JumpToReferenceImpl(reference, newWindow, sourceTextView);
+		}
+		
+		DecompilerDocument JumpToReferenceImpl(object reference, bool newWindow, DecompilerTextView sourceTextView = null)
+		{
 			if (reference is TypeReference) {
-				SelectNode(assemblyListTreeNode.FindTypeNode(((TypeReference)reference).Resolve()), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindTypeNode(((TypeReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is MethodReference) {
-				SelectNode(assemblyListTreeNode.FindMethodNode(((MethodReference)reference).Resolve()), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindMethodNode(((MethodReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is FieldReference) {
-				SelectNode(assemblyListTreeNode.FindFieldNode(((FieldReference)reference).Resolve()), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindFieldNode(((FieldReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is PropertyReference) {
-				SelectNode(assemblyListTreeNode.FindPropertyNode(((PropertyReference)reference).Resolve()), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindPropertyNode(((PropertyReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is EventReference) {
-				SelectNode(assemblyListTreeNode.FindEventNode(((EventReference)reference).Resolve()), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindEventNode(((EventReference)reference).Resolve()), newWindow, sourceTextView);
 			} else if (reference is AssemblyDefinition) {
-				SelectNode(assemblyListTreeNode.FindAssemblyNode((AssemblyDefinition)reference), newWindow, sourceTextView);
+				return SelectNode(assemblyListTreeNode.FindAssemblyNode((AssemblyDefinition)reference), newWindow, sourceTextView);
 			} else if (reference is Mono.Cecil.Cil.OpCode) {
 				string link = "http://msdn.microsoft.com/library/system.reflection.emit.opcodes." + ((Mono.Cecil.Cil.OpCode)reference).Code.ToString().ToLowerInvariant() + ".aspx";
 				try {
@@ -402,6 +492,7 @@ namespace ICSharpCode.ILSpy
 					
 				}
 			}
+			return null;
 		}
 		
 		#endregion
@@ -458,7 +549,7 @@ namespace ICSharpCode.ILSpy
 			DecompileSelectedNodes(nodes, newWindow ? null : CurrentDocument, recordInHistory, state);
 		}
 
-		private void DecompileSelectedNodes(List<SharpTreeNode> nodes, DecompilerDocument doc, bool recordInHistory, DecompilerTextViewState state = null)
+		private DecompilerDocument DecompileSelectedNodes(List<SharpTreeNode> nodes, DecompilerDocument doc, bool recordInHistory, DecompilerTextViewState state = null)
 		{
 			if (doc == null) {
 				doc = OpenNewDocument();
@@ -474,6 +565,7 @@ namespace ICSharpCode.ILSpy
 			}
 
 			doc.Decompile(this.CurrentLanguage, sharpTreeNodes, new DecompilationOptions() { TextViewState = state }, addToHistory: recordInHistory);
+			return doc;
 		}
 		
 		void SaveCommandExecuted(object sender, ExecutedRoutedEventArgs e)
@@ -725,6 +817,7 @@ namespace ICSharpCode.ILSpy
 			private TypesTreeView typesTreeView;
 			private Language language;
 			private bool decompiled;
+			private bool hasExternalContent;
 			
 			public DecompilerDocument(TypesTreeView typesTreeView)
 			{
@@ -755,6 +848,7 @@ namespace ICSharpCode.ILSpy
 			
 			public void Decompile(Language language, IEnumerable<SharpTreeNode> treeNodes, DecompilationOptions options, bool addToHistory)
 			{
+				this.hasExternalContent = false;
 				var selectedTreeNodes = treeNodes == null ? new List<ILSpyTreeNode>() : treeNodes.OfType<ILSpyTreeNode>().ToList();
 
 				if(addToHistory && (this.selectedNodes.Count > 0))
@@ -788,11 +882,18 @@ namespace ICSharpCode.ILSpy
 				if(treeNodes.Count == 0 && this.selectedNodes.Count > 0)
 					return false;
 				this.typesTreeView.SilentlySelectNodes(treeNodes);
-				if(!this.decompiled || language != this.language)
-					Decompile(language, treeNodes, null, addToHistory: false);
-				this.language = language;
-				this.decompiled = true;
+				if(!this.hasExternalContent) {
+					if (!this.decompiled || language != this.language)
+						Decompile(language, treeNodes, null, addToHistory: false);
+					this.language = language;
+					this.decompiled = true;
+				}
 				return true;
+			}
+			
+			public void UseForExternalContent()
+			{
+				this.hasExternalContent = true;
 			}
 			
 			public void ResetDecompilationState()
