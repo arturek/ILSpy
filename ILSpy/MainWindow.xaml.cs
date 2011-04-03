@@ -330,11 +330,7 @@ namespace ICSharpCode.ILSpy
 				return;
 			
 			Debug.WriteLine(String.Format("Activating document {0}.", doc.Title));
-			if(!doc.Activate(CurrentLanguage)) {
-				Debug.WriteLine(String.Format("Document {0} failed to activate and will be closed.", doc.Title));
-				// Close document if none of previously selected nodes can be found now.
-				SheduleNextAction(() => doc.Document.Close());
-			}
+			doc.Activate(CurrentLanguage);
 		}
 		
 		void SheduleNextAction(Action action)
@@ -794,14 +790,16 @@ namespace ICSharpCode.ILSpy
 				TextViewState = textViewState;
 			}
 			
-			public void Load(XElement el)
+			public static NavigationHistoryEntry Load(XElement el)
 			{
-				
+				List<string[]> nodes = new List<string[]>(el.Elements("node").Select(nd => DecompilerDocument.LoadNode(nd)));
+				return new NavigationHistoryEntry(nodes, new DecompilerTextViewState());
 			}
 			
 			public XElement Save(XName name)
 			{
-				return null;
+				return new XElement(name,
+				                    this.SelectedNodes.Select(nd => DecompilerDocument.SaveNode(nd, "node")));
 			}
 		}
 
@@ -848,9 +846,11 @@ namespace ICSharpCode.ILSpy
 			
 			public void Decompile(Language language, IEnumerable<SharpTreeNode> treeNodes, DecompilationOptions options, bool addToHistory)
 			{
-				this.hasExternalContent = false;
 				var selectedTreeNodes = treeNodes == null ? new List<ILSpyTreeNode>() : treeNodes.OfType<ILSpyTreeNode>().ToList();
+				if(selectedTreeNodes.Count == 0 && this.decompiled)
+					return;	// do not clear the content if nothing new can be shown.
 
+				this.hasExternalContent = false;
 				if(addToHistory && (this.selectedNodes.Count > 0))
 					this.History.Record(new NavigationHistoryEntry(this.SelectedNodes.ToList(), this.DecompilerTextView.GetState()));
 				this.selectedNodes.Clear();
@@ -908,6 +908,7 @@ namespace ICSharpCode.ILSpy
 				foreach (var nodeEl in el.Elements("node")) {
 					this.selectedNodes.Add(LoadNode(nodeEl));
 				}
+				History.Load(el.Element("history"), hEl => NavigationHistoryEntry.Load(hEl));
 			}
 
 			public XElement Save(XName name)
@@ -915,10 +916,12 @@ namespace ICSharpCode.ILSpy
 				return new XElement(name,
 				                    new XAttribute("name", this.Document.Name),
 				                    new XAttribute("title", this.Title),
-				                    this.SelectedNodes.Select(n => SaveNode(n, "node")));
+				                    this.SelectedNodes.Select(n => SaveNode(n, "node")),
+				                    this.History.Save("history", (nhe, nm) => nhe.Save(nm))
+				                   );
 			}
 			
-			XElement SaveNode(string[] path, XName name)
+			public static XElement SaveNode(string[] path, XName name)
 			{
 				if(!path.Any(p => p.Contains("/")))
 					return new XElement(name, new XAttribute("path", String.Join("/", path)));
@@ -926,7 +929,7 @@ namespace ICSharpCode.ILSpy
 					return new XElement(name, path.Select(p => new XElement("p", p)));
 			}
 
-			string[] LoadNode(XElement el)
+			public static string[] LoadNode(XElement el)
 			{
 				string path = (string)el.Attribute("path");
 				if(path != null)

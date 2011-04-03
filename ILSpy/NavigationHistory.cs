@@ -3,6 +3,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Xml.Linq;
 using ICSharpCode.TreeView;
 
 namespace ICSharpCode.ILSpy
@@ -59,6 +61,35 @@ namespace ICSharpCode.ILSpy
 		{
 			forward.Clear();
 			back.Add(node);
+		}
+		
+		public XElement Save(XName name, Func<T, XName, XElement> elementSaver)
+		{
+			if (name == null)
+				throw new ArgumentNullException("name");
+			if (elementSaver == null)
+				throw new ArgumentNullException("elementSaver");
+			
+			if(back.Count == 0 && forward.Count == 0)
+				return null;
+			
+			return new XElement(name,
+			                    new XElement("back",
+			                                 back.Select(t => elementSaver(t, "entry"))),
+			                    new XElement("forward",
+			                                 forward.Select(t => elementSaver(t, "entry"))));
+		}
+		
+		public void Load(XElement el, Func<XElement, T> elementLoader)
+		{
+			if (elementLoader == null)
+				throw new ArgumentNullException("elementLoader");
+
+			if(el == null)
+				return;
+
+			back.AddRange(el.Element("back").Elements("entry").Select(ent => elementLoader(ent)));
+			forward.AddRange(el.Element("forward").Elements("entry").Select(ent => elementLoader(ent)));
 		}
 	}
 }
