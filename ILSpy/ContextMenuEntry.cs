@@ -105,7 +105,8 @@ namespace ICSharpCode.ILSpy
 							menuItem.Click += delegate {
 								entry.Execute(selectedNodes);
 							};
-						}
+						} else
+							menuItem.IsEnabled = false;
 						menu.Items.Add(menuItem);
 					}
 				}

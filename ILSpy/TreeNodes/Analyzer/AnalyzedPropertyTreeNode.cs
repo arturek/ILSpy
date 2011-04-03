@@ -56,11 +56,23 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		
 		protected override void LoadChildren()
 		{
+			if(AnalyzedPropertyAccessorsTreeNode.CanShow(analyzedProperty))
+				this.Children.Add(new AnalyzedPropertyAccessorsTreeNode(analyzedProperty));
 			if (AnalyzedPropertyOverridesTreeNode.CanShowAnalyzer(analyzedProperty))
 				this.Children.Add(new AnalyzedPropertyOverridesTreeNode(analyzedProperty));
 			//if (analyzedProperty.HasBody)
 			//    this.Children.Add(new AnalyzedMethodUsesNode(analyzedProperty));
 			//this.Children.Add(new AnalyzedMethodUsedByTreeNode(analyzedProperty));
+		}
+		
+		public static bool CanShow(MemberReference member)
+		{
+			var property = member as PropertyDefinition;
+			if(property == null)
+				return false;
+			
+			return AnalyzedPropertyAccessorsTreeNode.CanShow(property)
+				|| AnalyzedPropertyOverridesTreeNode.CanShowAnalyzer(property);
 		}
 	}
 }
