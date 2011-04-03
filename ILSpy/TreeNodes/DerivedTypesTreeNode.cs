@@ -33,6 +33,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return "Derived Types"; }
 		}
 		
+		public override string PathName {
+			get { return @"..DerivedTypes"; }
+		}
+		
 		public override object Icon {
 			get { return Images.SubTypes; }
 		}

@@ -44,6 +44,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return HighlightSearchMatch(name.Length == 0 ? "-" : name); }
 		}
 		
+		public override string PathName {
+			get { return name; }
+		}
+		
 		public override object Icon {
 			get { return Images.Namespace; }
 		}

@@ -43,6 +43,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return "Base Types"; }
 		}
 		
+		public override string PathName {
+			get { return @"..BaseTypes"; }
+		}
+		
 		public override object Icon {
 			get { return Images.SuperTypes; }
 		}

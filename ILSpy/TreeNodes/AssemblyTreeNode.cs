@@ -68,6 +68,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return HighlightSearchMatch(assembly.ShortName); }
 		}
 		
+		public override string PathName {
+			get { return assembly.ShortName; }
+		}
+		
 		public override object Icon {
 			get {
 				if (assembly.IsLoaded) {

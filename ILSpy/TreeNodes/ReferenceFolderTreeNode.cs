@@ -43,6 +43,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return "References"; }
 		}
 		
+		public override string PathName {
+			get { return @"..References"; }
+		}
+		
 		public override object Icon {
 			get { return Images.ReferenceFolderClosed; }
 		}

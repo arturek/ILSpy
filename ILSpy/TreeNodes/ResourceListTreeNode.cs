@@ -36,6 +36,10 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			get { return "Resources"; }
 		}
 		
+		public override string PathName {
+			get { return @"..Resources"; }
+		}
+		
 		public override object Icon {
 			get { return Images.Resource; }
 		}

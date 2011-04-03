@@ -541,7 +541,6 @@ namespace ICSharpCode.ILSpy
 		#region Decompile
 		private void DecompileSelectedNodes(List<SharpTreeNode> nodes, bool newWindow, bool recordInHistory, DecompilerTextViewState state = null)
 		{
-			var doc = newWindow ? null : CurrentDocument;
 			DecompileSelectedNodes(nodes, newWindow ? null : CurrentDocument, recordInHistory, state);
 		}
 
@@ -551,7 +550,7 @@ namespace ICSharpCode.ILSpy
 				doc = OpenNewDocument();
 				recordInHistory = false;
 			}
-						
+			
 			IEnumerable<SharpTreeNode> sharpTreeNodes = null;
 			if(nodes != null) {
 				typesTreeView.SilentlySelectNodes(nodes);
@@ -680,7 +679,6 @@ namespace ICSharpCode.ILSpy
 		{
 			base.OnClosing(e);
 			sessionSettings.ActiveAssemblyList = assemblyList.ListName;
-			sessionSettings.ActiveTreeViewPath = typesTreeView.GetPathForNode(treeView.SelectedItem as SharpTreeNode);
 			sessionSettings.WindowBounds = this.RestoreBounds;
 
 			// Prepare saving sessions and layout (they both need correct document names)
@@ -705,10 +703,12 @@ namespace ICSharpCode.ILSpy
 			get
 			{
 				var doc = this.dockManager.ActiveDocument;
-				if(doc != null)
-					return doc.Tag as DecompilerDocument;
-				else
-					return null;
+				if(doc != null) {
+					var dd = doc.Tag as DecompilerDocument;
+					if(ListVisibleDocuments().Contains(dd))
+						return dd;
+				}
+				return null;
 			}
 		}
 		
@@ -977,7 +977,7 @@ namespace ICSharpCode.ILSpy
 			}
 			
 			/// <summary>
-			/// Retrieves a node using the .ToString() representations of its ancestors.
+			/// Retrieves a node using the display-independent representations of its ancestors.
 			/// </summary>
 			public SharpTreeNode FindNodeByPath(string[] path, bool returnBestMatch)
 			{
@@ -990,7 +990,7 @@ namespace ICSharpCode.ILSpy
 						break;
 					bestMatch = node;
 					node.EnsureLazyChildren();
-					node = node.Children.FirstOrDefault(c => c.ToString() == element);
+					node = node.Children.FirstOrDefault(c => GetNodeName(c) == element);
 				}
 				if (returnBestMatch)
 					return node ?? bestMatch;
@@ -999,7 +999,7 @@ namespace ICSharpCode.ILSpy
 			}
 			
 			/// <summary>
-			/// Gets the .ToString() representation of the node's ancestors.
+			/// Gets the display-independent representation of the node's ancestors.
 			/// </summary>
 			public string[] GetPathForNode(SharpTreeNode node)
 			{
@@ -1007,11 +1007,22 @@ namespace ICSharpCode.ILSpy
 					return null;
 				List<string> path = new List<string>();
 				while (node.Parent != null) {
-					path.Add(node.ToString());
+					path.Add(GetNodeName(node));
 					node = node.Parent;
 				}
 				path.Reverse();
 				return path.ToArray();
+			}
+			
+			private static string GetNodeName(SharpTreeNode node)
+			{
+				if (node == null)
+					throw new ArgumentNullException("node");
+				var ilNode = node as ILSpyTreeNode;
+				if(ilNode != null)
+					return ilNode.PathName;
+				else
+					return node.ToString();
 			}
 			
 			public IEnumerable<SharpTreeNode> GetSelectedNodes()

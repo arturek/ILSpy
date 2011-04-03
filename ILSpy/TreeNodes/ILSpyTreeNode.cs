@@ -63,6 +63,21 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			return text + suffix;
 		}
 		
+		/// <summary>
+		/// The name of the node used to build the node's path.
+		/// </summary>
+		public virtual string PathName
+		{
+			get
+			{
+				var mtn = this as IMemberTreeNode;
+				if(mtn != null)
+					return mtn.Member.FullName;
+				else
+					return this.Text.ToString();
+			}
+		}
+		
 		public abstract void Decompile(Language language, ITextOutput output, DecompilationOptions options);
 		
 		/// <summary>
