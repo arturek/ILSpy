@@ -100,8 +100,9 @@ namespace ICSharpCode.ILSpy
 			ContextMenuProvider.Add(treeView);
 			ContextMenuProvider.Add(analyzerTree);
 			
-			
-			this.LoadDocuments(sessionSettings.GetSettings("{uri://sharpdevelop.net/ilspy}OpenDocuments"));
+			var docConfiguration = sessionSettings.GetSettings("{uri://sharpdevelop.net/ilspy}OpenDocuments");
+			if(docConfiguration != null)
+				this.LoadDocuments();
 			
 			this.Loaded += new RoutedEventHandler(MainWindow_Loaded);
 
