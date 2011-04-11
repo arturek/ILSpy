@@ -95,11 +95,17 @@ namespace ICSharpCode.Decompiler.Tests
 			TestFile(@"..\..\Tests\YieldReturn.cs");
 		}
 		
+		[Test, Ignore("Formatting differences")]
+		public void QueryExpressions()
+		{
+			TestFile(@"..\..\Tests\QueryExpressions.cs");
+		}
+		
 		public void RoundtripFile(string fileName)
 		{
 			string code = File.ReadAllText(fileName);
 			AssemblyDefinition assembly = Compile(code);
-			AstBuilder decompiler = new AstBuilder(new DecompilerContext());
+			AstBuilder decompiler = new AstBuilder(new DecompilerContext(assembly.Modules[0]));
 			decompiler.AddAssembly(assembly);
 			StringWriter output = new StringWriter();
 			decompiler.GenerateCode(new PlainTextOutput(output));
@@ -117,9 +123,9 @@ namespace ICSharpCode.Decompiler.Tests
 		{
 			string code = File.ReadAllText(fileName);
 			AssemblyDefinition assembly = Compile(code);
-			AstBuilder decompiler = new AstBuilder(new DecompilerContext());
+			AstBuilder decompiler = new AstBuilder(new DecompilerContext(assembly.MainModule));
 			decompiler.AddAssembly(assembly);
-			decompiler.Transform(new Helpers.RemoveCompilerAttribute());
+			new Helpers.RemoveCompilerAttribute().Run(decompiler.CompilationUnit);
 			StringWriter output = new StringWriter();
 			decompiler.GenerateCode(new PlainTextOutput(output));
 			StringWriter diff = new StringWriter();

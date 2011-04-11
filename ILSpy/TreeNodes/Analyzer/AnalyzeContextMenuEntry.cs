@@ -34,7 +34,9 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		public bool IsEnabled(SharpTreeNode[] selectedNodes)
 		{
 			foreach (IMemberTreeNode node in selectedNodes) {
-				if (!(node.Member is FieldDefinition || node.Member is MethodDefinition || Analyzer.AnalyzedPropertyTreeNode.CanShow(node.Member)))
+				if (!(node.Member is FieldDefinition
+					|| node.Member is MethodDefinition
+					|| Analyzer.AnalyzedPropertyTreeNode.CanShow(node.Member)))
 					return false;
 			}
 			return true;
@@ -51,8 +53,9 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 				MethodDefinition method = node.Member as MethodDefinition;
 				if (method != null)
 					MainWindow.Instance.AddToAnalyzer(new AnalyzedMethodTreeNode(method));
-				if (Analyzer.AnalyzedPropertyTreeNode.CanShow(node.Member))
-					MainWindow.Instance.AddToAnalyzer(new AnalyzedPropertyTreeNode(node.Member as PropertyDefinition));
+				var propertyAnalyzer = Analyzer.AnalyzedPropertyTreeNode.TryCreateAnalyzer(node.Member);
+				if(propertyAnalyzer != null)
+					MainWindow.Instance.AddToAnalyzer(propertyAnalyzer);
 			}
 		}
 	}

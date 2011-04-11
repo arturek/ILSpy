@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
+// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this
 // software and associated documentation files (the "Software"), to deal in the Software
@@ -40,18 +40,20 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		}
 		
 		public override object Icon {
-			get { return PropertyTreeNode.GetIcon(analyzedProperty); }
+			get { return PropertyTreeNode.GetIcon(analyzedProperty, isIndexer); }
 		}
 		
 		public override object Text {
 			get {
-				return prefix + Language.TypeToString(analyzedProperty.DeclaringType, true) + "." + PropertyTreeNode.GetText(analyzedProperty, Language); }
+				// TODO: This way of formatting is not suitable for properties which explicitly implement interfaces.
+				return prefix + Language.TypeToString(analyzedProperty.DeclaringType, true) + "." + PropertyTreeNode.GetText(analyzedProperty, Language, isIndexer); }
 		}
 		
 		public override void ActivateItem(System.Windows.RoutedEventArgs e)
 		{
 			e.Handled = true;
-			MainWindow.Instance.JumpToReference(analyzedProperty, Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl));
+			MainWindow.Instance.JumpToReference(analyzedProperty,
+				newWindow: Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl));
 		}
 		
 		protected override void LoadChildren()
@@ -64,13 +66,21 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 			//    this.Children.Add(new AnalyzedMethodUsesNode(analyzedProperty));
 			//this.Children.Add(new AnalyzedMethodUsedByTreeNode(analyzedProperty));
 		}
-		
+
+		public static AnalyzerTreeNode TryCreateAnalyzer(MemberReference member)
+		{
+			if (CanShow(member))
+				return new AnalyzedPropertyTreeNode(member as PropertyDefinition);
+			else
+				return null;
+		}
+
 		public static bool CanShow(MemberReference member)
 		{
 			var property = member as PropertyDefinition;
-			if(property == null)
+			if (property == null)
 				return false;
-			
+
 			return AnalyzedPropertyAccessorsTreeNode.CanShow(property)
 				|| AnalyzedPropertyOverridesTreeNode.CanShowAnalyzer(property);
 		}

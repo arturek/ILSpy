@@ -106,8 +106,10 @@ namespace ICSharpCode.ILSpy
 				return type.Name;
 		}
 
-		public virtual string FormatPropertyName(PropertyDefinition property, bool? isIndexer)
+		public virtual string FormatPropertyName(PropertyDefinition property, bool? isIndexer = null)
 		{
+			if (property == null)
+				throw new ArgumentNullException("property");
 			return property.Name;
 		}
 		

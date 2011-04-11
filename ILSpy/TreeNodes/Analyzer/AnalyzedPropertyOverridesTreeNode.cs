@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -54,8 +54,9 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 			return FindReferences(MainWindow.Instance.AssemblyList.GetAssemblies(), ct);
 		}
 
-		IEnumerable<SharpTreeNode> FindReferences(LoadedAssembly[] assemblies, CancellationToken ct)
+		IEnumerable<SharpTreeNode> FindReferences(IEnumerable<LoadedAssembly> assemblies, CancellationToken ct)
 		{
+			assemblies = assemblies.Where(asm => asm.AssemblyDefinition != null);
 			// use parallelism only on the assembly level (avoid locks within Cecil)
 			return assemblies.AsParallel().WithCancellation(ct).SelectMany((LoadedAssembly asm) => FindReferences(asm, ct));
 		}
@@ -86,7 +87,7 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		public static bool CanShowAnalyzer(PropertyDefinition property)
 		{
 			var accessor = property.GetMethod ?? property.SetMethod;
-			return accessor.IsVirtual && !accessor.DeclaringType.IsInterface;
+			return accessor.IsVirtual && !accessor.IsFinal && !accessor.DeclaringType.IsInterface;
 		}
 	}
 }

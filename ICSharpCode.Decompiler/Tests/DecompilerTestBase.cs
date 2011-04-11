@@ -56,16 +56,15 @@ namespace ICSharpCode.Decompiler.Tests
 		/// <returns>The decompilation result of compiled source code.</returns>
 		static string RoundtripCode(string code)
 		{
+			DecompilerSettings settings = new DecompilerSettings();
+			settings.FullyQualifyAmbiguousTypeNames = false;
 			AssemblyDefinition assembly = Compile(code);
-			AstBuilder decompiler = new AstBuilder(new DecompilerContext());
+			AstBuilder decompiler = new AstBuilder(new DecompilerContext(assembly.MainModule) { Settings = settings });
 			decompiler.AddAssembly(assembly);
-
-			var pipeline =
-				decompiler.CreateStandardCodeTransformationPipeline()
-				.InsertBefore(el => el is IntroduceUsingDeclarations, new Helpers.RemoveCompilerAttribute());
+			new Helpers.RemoveCompilerAttribute().Run(decompiler.CompilationUnit);
 
 			StringWriter output = new StringWriter();
-			decompiler.TransformAndGenerateCode(new PlainTextOutput(output), pipeline);
+			decompiler.GenerateCode(new PlainTextOutput(output));
 			return output.ToString();
 		}
 

@@ -59,7 +59,7 @@ namespace ICSharpCode.Decompiler
 			throw new NotSupportedException ();
 		}
 		
-		public static int GetPopDelta(this Instruction instruction, MethodDefinition current, int currentStackSize)
+		public static int? GetPopDelta(this Instruction instruction)
 		{
 			OpCode code = instruction.OpCode;
 			switch (code.StackBehaviourPop) {
@@ -89,18 +89,18 @@ namespace ICSharpCode.Decompiler
 					return 3;
 
 				case StackBehaviour.PopAll:
-					return currentStackSize;
+					return null;
 
 				case StackBehaviour.Varpop:
 					if (code == OpCodes.Ret)
-						return IsVoid (current.ReturnType) ? 0 : 1;
+						return null;
 
 					if (code.FlowControl != FlowControl.Call)
 						break;
 
 					IMethodSignature method = (IMethodSignature) instruction.Operand;
 					int count = method.HasParameters ? method.Parameters.Count : 0;
-					if (method.HasThis && code != OpCodes.Newobj)
+					if (code == OpCodes.Calli || (method.HasThis && code != OpCodes.Newobj))
 						++count;
 
 					return count;
@@ -111,7 +111,9 @@ namespace ICSharpCode.Decompiler
 		
 		public static bool IsVoid(this TypeReference type)
 		{
-			return type.FullName == "System.Void" && !(type is TypeSpecification);
+			while (type is OptionalModifierType || type is RequiredModifierType)
+				type = ((TypeSpecification)type).ElementType;
+			return type.MetadataType == MetadataType.Void;
 		}
 		
 		public static bool IsValueTypeOrVoid(this TypeReference type)
@@ -203,6 +205,36 @@ namespace ICSharpCode.Decompiler
 				return true;
 			return IsCompilerGeneratedOrIsInCompilerGeneratedClass(member.DeclaringType);
 		}
+		
+		public static bool IsAnonymousType(this TypeReference type)
+		{
+			if (type == null)
+				return false;
+			if (string.IsNullOrEmpty(type.Namespace) && type.Name.StartsWith("<>", StringComparison.Ordinal) && type.Name.Contains("AnonymousType")) {
+				TypeDefinition td = type.Resolve();
+				return td != null && td.IsCompilerGenerated();
+			}
+			return false;
+		}
+		
+		public static bool ContainsAnonymousType(this TypeReference type)
+		{
+			GenericInstanceType git = type as GenericInstanceType;
+			if (git != null) {
+				if (IsAnonymousType(git))
+					return true;
+				for (int i = 0; i < git.GenericArguments.Count; i++) {
+					if (git.GenericArguments[i].ContainsAnonymousType())
+						return true;
+				}
+				return false;
+			}
+			TypeSpecification typeSpec = type as TypeSpecification;
+			if (typeSpec != null)
+				return typeSpec.ElementType.ContainsAnonymousType();
+			else
+				return false;
+		}
 
 		public static string GetDefaultMemberName(this TypeDefinition type)
 		{
@@ -214,9 +246,10 @@ namespace ICSharpCode.Decompiler
 		{
 			if (type.HasCustomAttributes)
 				foreach (CustomAttribute ca in type.CustomAttributes)
-					if (ca.Constructor.FullName == @"System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)") {
+					if (ca.Constructor.DeclaringType.Name == "DefaultMemberAttribute" && ca.Constructor.DeclaringType.Namespace == "System.Reflection"
+						&& ca.Constructor.FullName == @"System.Void System.Reflection.DefaultMemberAttribute::.ctor(System.String)") {
 						defaultMemberAttribute = ca;
-						return ca.ConstructorArguments.Single().Value as string;
+						return ca.ConstructorArguments[0].Value as string;
 					}
 			defaultMemberAttribute = null;
 			return null;
@@ -232,20 +265,26 @@ namespace ICSharpCode.Decompiler
 		{
 			defaultMemberAttribute = null;
 			if (property.HasParameters) {
-				if ((property.GetMethod ?? property.SetMethod).HasOverrides) {
-					var overridedAccessor = (property.GetMethod ?? property.SetMethod).Overrides.First();
-					var oa = overridedAccessor.Resolve();
-					if (oa == null)
+				var accessor = property.GetMethod ?? property.SetMethod;
+				PropertyDefinition basePropDef = property;
+				if (accessor.HasOverrides) {
+					// if the property is explicitly implementing an interface, look up the property in the interface:
+					MethodDefinition baseAccessor = accessor.Overrides.First().Resolve();
+					if (baseAccessor != null) {
+						foreach (PropertyDefinition baseProp in baseAccessor.DeclaringType.Properties) {
+							if (baseProp.GetMethod == baseAccessor || baseProp.SetMethod == baseAccessor) {
+								basePropDef = baseProp;
+								break;
+							}
+						}
+					} else
 						return false;
-					var overridedProperty = oa.DeclaringType.Properties.First(prop => prop.GetMethod == oa || prop.SetMethod == oa);
-					return overridedProperty.IsIndexer();
-				} else {
-					CustomAttribute attr;
-					var defaultMemberName = property.DeclaringType.GetDefaultMemberName(out attr);
-					if (defaultMemberName == property.Name) {
-						defaultMemberAttribute = attr;
-						return true;
-					}
+				}
+				CustomAttribute attr;
+				var defaultMemberName = basePropDef.DeclaringType.GetDefaultMemberName(out attr);
+				if (defaultMemberName == basePropDef.Name) {
+					defaultMemberAttribute = attr;
+					return true;
 				}
 			}
 			return false;

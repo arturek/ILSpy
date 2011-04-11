@@ -102,7 +102,8 @@ namespace ICSharpCode.ILSpy
 							};
 						}
 						if (entryPair.Value.IsEnabled(selectedNodes)) {
-							menuItem.Click += delegate {
+							menuItem.Click += delegate
+							{
 								entry.Execute(selectedNodes);
 							};
 						} else

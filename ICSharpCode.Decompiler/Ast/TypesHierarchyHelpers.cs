@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -167,6 +167,8 @@ namespace ICSharpCode.Decompiler.Ast
 		{
 			if (tr1 == tr2)
 				return true;
+			if (tr1 == null || tr2 == null)
+				return false;
 
 			if (tr1.Name == tr2.Name && tr1.FullName == tr2.FullName)
 				return true;

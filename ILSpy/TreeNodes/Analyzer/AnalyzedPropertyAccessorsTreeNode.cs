@@ -1,11 +1,3 @@
-﻿/*
- * Created by SharpDevelop.
- * User: art
- * Date: 2011-04-03
- * Time: 09:02
- * 
- * To change this template use Tools | Options | Coding | Edit Standard Headers.
- */
 using System;
 using Mono.Cecil;
 
