@@ -537,7 +537,7 @@ namespace ICSharpCode.ILSpy
 		#endregion
 		
 		#region Decompile
-		private void DecompileSelectedNodes(List<SharpTreeNode> nodes, bool newWindow, bool recordInHistory, DecompilerTextViewState state = null)
+		internal void DecompileSelectedNodes(List<SharpTreeNode> nodes, bool newWindow, bool recordInHistory, DecompilerTextViewState state = null)
 		{
 			DecompileSelectedNodes(nodes, newWindow ? null : CurrentDocument, recordInHistory, state);
 		}
