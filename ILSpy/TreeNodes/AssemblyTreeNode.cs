@@ -165,9 +165,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		
 		public override void DeleteCore()
 		{
-			lock (assembly.AssemblyList.assemblies) {
-				assembly.AssemblyList.assemblies.Remove(assembly);
-			}
+			assembly.AssemblyList.Unload(assembly);
 		}
 		
 		internal const string DataFormat = "ILSpyAssemblies";
