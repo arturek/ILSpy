@@ -66,6 +66,9 @@ namespace ICSharpCode.ILSpy
 			var provider = new ContextMenuProvider(treeView);
 			treeView.ContextMenuOpening += provider.treeView_ContextMenuOpening;
 			treeView.ContextMenuClosing -= provider.treeView_ContextMenuClosing;
+			// Context menu is shown only when the ContextMenu property is not null before the
+			// ContextMenuOpening event handler is called.
+			treeView.ContextMenu = new ContextMenu();
 		}
 		
 		readonly SharpTreeView treeView;
@@ -114,6 +117,9 @@ namespace ICSharpCode.ILSpy
 			}
 			if (menu.Items.Count > 0)
 				treeView.ContextMenu = menu;
+			else
+				// hide the context menu.
+				e.Handled = true;
 		}
 		
 		void treeView_ContextMenuClosing(object sender, ContextMenuEventArgs e)
