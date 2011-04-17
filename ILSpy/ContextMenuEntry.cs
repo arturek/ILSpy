@@ -116,7 +116,7 @@ namespace ICSharpCode.ILSpy
 				}
 			}
 			if (menu.Items.Count > 0)
-				treeView.ContextMenu = menu;
+			 	treeView.ContextMenu = menu;
 			else
 				// hide the context menu.
 				e.Handled = true;

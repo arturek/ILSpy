@@ -34,11 +34,11 @@ using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
-
 using AvalonDock;
 using ICSharpCode.ILSpy.TextView;
 using ICSharpCode.ILSpy.TreeNodes;
 using ICSharpCode.ILSpy.TreeNodes.Analyzer;
+using ICSharpCode.ILSpy.XmlDoc;
 using ICSharpCode.TreeView;
 using Microsoft.Win32;
 using Mono.Cecil;

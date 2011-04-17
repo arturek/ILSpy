@@ -57,10 +57,12 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 						Variables = { new VariableInitializer(v.Name, v.ReplacedAssignment.Right.Detach()).CopyAnnotationsFrom(v.ReplacedAssignment) }
 					};
 					ExpressionStatement es = v.ReplacedAssignment.Parent as ExpressionStatement;
-					if (es != null)
+					if (es != null) {
+						// Note: if this crashes with 'Cannot replace the root node', check whether two variables were assigned the same name
 						es.ReplaceWith(varDecl.CopyAnnotationsFrom(es));
-					else
+					} else {
 						v.ReplacedAssignment.ReplaceWith(varDecl);
+					}
 				}
 			}
 			variablesToDeclare = null;
@@ -198,7 +200,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 					}
 					// If we can move the variable into the sub-block, we need to ensure that the remaining code
 					// does not use the value that was assigned by the first sub-block
-					Statement nextStatement = stmt.NextStatement;
+					Statement nextStatement = stmt.GetNextStatement();
 					if (nextStatement != null) {
 						// Analyze the range from the next statement to the end of the block
 						daa.SetAnalyzedRange(nextStatement, block);
