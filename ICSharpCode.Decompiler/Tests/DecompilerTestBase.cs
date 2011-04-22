@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using ICSharpCode.Decompiler.Ast;
+using ICSharpCode.Decompiler.Tests.Helpers;
 using ICSharpCode.Decompiler.Ast.Transforms;
 using MbUnit.Framework;
 using Microsoft.CSharp;
@@ -41,7 +42,7 @@ namespace ICSharpCode.Decompiler.Tests
 			var lines = File.ReadAllLines(Path.Combine(@"..\..\Tests", samplesFileName));
 			var testCode = RemoveIgnorableLines(lines);
 			var decompiledTestCode = RoundtripCode(testCode);
-			Assert.AreEqual(testCode, decompiledTestCode);
+			CodeAssert.AreEqual(testCode, decompiledTestCode);
 		}
 
 		static string RemoveIgnorableLines(IEnumerable<string> lines)

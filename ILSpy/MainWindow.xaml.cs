@@ -88,7 +88,7 @@ namespace ICSharpCode.ILSpy
 			App.CompositionContainer.ComposeParts(this);
 			
 			this.typesTreeView = new MainWindow.TypesTreeView(this.treeView);
-			this.typesTreeView.SelectionChanged += delegate { DecompileSelectedNodes(null, newWindow: false, recordInHistory: false); };
+			this.typesTreeView.SelectionChanged += delegate { DecompileSelectedNodes(null, newWindow: false, recordInHistory: true); };
 			
 			sessionSettings.FilterSettings.PropertyChanged += filterSettings_PropertyChanged;
 			
@@ -390,9 +390,9 @@ namespace ICSharpCode.ILSpy
 
 		void assemblyList_Assemblies_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
 		{
-//			if (e.OldItems != null)
-//				foreach (LoadedAssembly asm in e.OldItems)
-//					history.RemoveAll(n => n.Item1.Any(nd => nd.AncestorsAndSelf().OfType<AssemblyTreeNode>().Any(a => a.LoadedAssembly == asm)));
+			//if (e.OldItems != null)
+			//	foreach (LoadedAssembly asm in e.OldItems)
+			//		history.RemoveAll(n => n.TreeNodes.Any(nd => nd.AncestorsAndSelf().OfType<AssemblyTreeNode>().Any(a => a.LoadedAssembly == asm)));
 		}
 		
 		void LoadInitialAssemblies()
@@ -628,9 +628,10 @@ namespace ICSharpCode.ILSpy
 			var history = session.History;
 			
 			var historyEntry = new NavigationHistoryEntry(typesTreeView.GetSelectedNodesPaths(), session.DecompilerTextView.GetState());
-			
+			history.Record(historyEntry, replace: true, clearForward: false);
+
 			while(forward ? history.CanNavigateForward : history.CanNavigateBack) {
-				var newState = forward ? history.GoForward(historyEntry) : history.GoBack(historyEntry);
+				var newState = forward ? history.GoForward() : history.GoBack();
 				
 				var treeNodes = newState.SelectedNodes.Select(nd => typesTreeView.FindNodeByPath(nd, false)).Where(tn => tn != null).ToList();
 				if(treeNodes.Count != 0) {
@@ -643,9 +644,9 @@ namespace ICSharpCode.ILSpy
 			// Remove state saved by the first navigation attempt if none succeeded.
 			if(historyEntry == null)
 				if(forward)
-					history.GoBack(null);
+					history.GoBack();
 				else
-					history.GoForward(null);
+					history.GoForward();
 			return false;
 		}
 		
@@ -776,8 +777,8 @@ namespace ICSharpCode.ILSpy
 			
 			return new XElement(name, sessions);
 		}
-		
-		class NavigationHistoryEntry
+
+		class NavigationHistoryEntry : IEquatable<NavigationHistoryEntry>
 		{
 			public DecompilerTextViewState TextViewState;
 			public List<string[]> SelectedNodes;
@@ -798,6 +799,21 @@ namespace ICSharpCode.ILSpy
 			{
 				return new XElement(name,
 				                    this.SelectedNodes.Select(nd => DecompilerDocument.SaveNode(nd, "node")));
+			}
+
+			public bool Equals(NavigationHistoryEntry other)
+			{
+				if (this.SelectedNodes.Count != other.SelectedNodes.Count)
+					return false;
+				for (int index = 0; index < this.SelectedNodes.Count; index++) {
+					if (this.SelectedNodes[index].Length != other.SelectedNodes[index].Length)
+						return false;
+					for (int index2 = 0; index2 < this.SelectedNodes[index].Length; index2++) {
+						if (this.SelectedNodes[index][index2] != other.SelectedNodes[index][index2])
+							return false;
+					}
+				}
+				return true;
 			}
 		}
 

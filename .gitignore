@@ -5,3 +5,7 @@ obj/
 /ILSpy/Properties/AssemblyInfo.cs
 *.suo
 *.user
+/Resharper-ILSpy-Style.xml
+_ReSharper*/
+*.ReSharper
+*.patch
