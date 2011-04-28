@@ -49,7 +49,7 @@ namespace ICSharpCode.ILSpy.TreeNodes.Analyzer
 		public override void ActivateItem(System.Windows.RoutedEventArgs e)
 		{
 			e.Handled = true;
-			MainWindow.Instance.JumpToReference(analyzedEvent);
+			MainWindow.Instance.JumpToReference(analyzedEvent, false);
 		}
 		
 		protected override void LoadChildren()

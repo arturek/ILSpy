@@ -165,7 +165,8 @@ namespace ICSharpCode.ILSpy
 						}
 					}
 				}
-				ILSpy.MainWindow.Instance.TextView.Show(output);
+				var doc = ((IDocumentsManager)ILSpy.MainWindow.Instance).OpenTextView("Resource");
+				doc.Show(output);
 			} else {
 				Process.Start(e.Uri.ToString());
 			}
