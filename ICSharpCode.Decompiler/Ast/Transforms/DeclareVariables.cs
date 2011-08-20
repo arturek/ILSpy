@@ -36,7 +36,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 		{
 			public AstType Type;
 			public string Name;
-			public ILVariable Variable;
+			public ILVariable ILVariable;
 			
 			public AssignmentExpression ReplacedAssignment;
 			public Statement InsertionPoint;
@@ -59,12 +59,9 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 			foreach (var v in variablesToDeclare) {
 				if (v.ReplacedAssignment == null) {
 					BlockStatement block = (BlockStatement)v.InsertionPoint.Parent;
-					var vds = new VariableDeclarationStatement((AstType)v.Type.Clone(), v.Name);
-					if(v.Variable != null)
-						vds.Variables.First().AddAnnotation(v.Variable);
 					block.Statements.InsertBefore(
 						v.InsertionPoint,
-						vds);
+						new VariableDeclarationStatement((AstType)v.Type.Clone(), v.Name));
 				}
 			}
 			// First do all the insertions, then do all the replacements. This is necessary because a replacement might remove our reference point from the AST.
@@ -72,13 +69,10 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 				if (v.ReplacedAssignment != null) {
 					// We clone the right expression so that it doesn't get removed from the old ExpressionStatement,
 					// which might be still in use by the definite assignment graph.
-					var variableInit = new VariableInitializer(v.Name, v.ReplacedAssignment.Right.Detach())
-						.CopyAnnotationsFrom(v.ReplacedAssignment)
-						.CopyAnnotationsFrom(v.ReplacedAssignment.Left)
-						.WithAnnotation(v.Variable);
+					VariableInitializer initializer = new VariableInitializer(v.Name, v.ReplacedAssignment.Right.Detach()).CopyAnnotationsFrom(v.ReplacedAssignment).WithAnnotation(v.ILVariable);
 					VariableDeclarationStatement varDecl = new VariableDeclarationStatement {
 						Type = (AstType)v.Type.Clone(),
-						Variables = { variableInit }
+						Variables = { initializer }
 					};
 					ExpressionStatement es = v.ReplacedAssignment.Parent as ExpressionStatement;
 					if (es != null) {
@@ -109,10 +103,11 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 						daa = new DefiniteAssignmentAnalysis(block, cancellationToken);
 					}
 					foreach (VariableDeclarationStatement varDecl in variables) {
-						string variableName = varDecl.Variables.Single().Name;
-						bool allowPassIntoLoops = varDecl.Variables.Single().Annotation<DelegateConstruction.CapturedVariableAnnotation>() == null;
-						ILVariable ilVariable = varDecl.Variables.Single().Annotation<ILVariable>();
-						DeclareVariableInBlock(daa, block, varDecl.Type, variableName, allowPassIntoLoops, ilVariable);
+						VariableInitializer initializer = varDecl.Variables.Single();
+						string variableName = initializer.Name;
+						ILVariable v = initializer.Annotation<ILVariable>();
+						bool allowPassIntoLoops = initializer.Annotation<DelegateConstruction.CapturedVariableAnnotation>() == null;
+						DeclareVariableInBlock(daa, block, varDecl.Type, variableName, v, allowPassIntoLoops);
 					}
 				}
 			}
@@ -121,7 +116,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 			}
 		}
 		
-		void DeclareVariableInBlock(DefiniteAssignmentAnalysis daa, BlockStatement block, AstType type, string variableName, bool allowPassIntoLoops, ILVariable ilVariable)
+		void DeclareVariableInBlock(DefiniteAssignmentAnalysis daa, BlockStatement block, AstType type, string variableName, ILVariable v, bool allowPassIntoLoops)
 		{
 			// declarationPoint: The point where the variable would be declared, if we decide to declare it in this block
 			Statement declarationPoint = null;
@@ -137,52 +132,52 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 					ForStatement forStmt = stmt as ForStatement;
 					if (forStmt != null && forStmt.Initializers.Count == 1) {
 						// handle the special case of moving a variable into the for initializer
-						if (TryConvertAssignmentExpressionIntoVariableDeclaration(forStmt.Initializers.Single(), type, variableName, ilVariable))
+						if (TryConvertAssignmentExpressionIntoVariableDeclaration(forStmt.Initializers.Single(), type, variableName))
 							continue;
 					}
 					UsingStatement usingStmt = stmt as UsingStatement;
 					if (usingStmt != null && usingStmt.ResourceAcquisition is AssignmentExpression) {
 						// handle the special case of moving a variable into a using statement
-						if (TryConvertAssignmentExpressionIntoVariableDeclaration((Expression)usingStmt.ResourceAcquisition, type, variableName, ilVariable))
+						if (TryConvertAssignmentExpressionIntoVariableDeclaration((Expression)usingStmt.ResourceAcquisition, type, variableName))
 							continue;
 					}
 					foreach (AstNode child in stmt.Children) {
 						BlockStatement subBlock = child as BlockStatement;
 						if (subBlock != null) {
-							DeclareVariableInBlock(daa, subBlock, type, variableName, allowPassIntoLoops, ilVariable);
+							DeclareVariableInBlock(daa, subBlock, type, variableName, v, allowPassIntoLoops);
 						} else if (HasNestedBlocks(child)) {
 							foreach (BlockStatement nestedSubBlock in child.Children.OfType<BlockStatement>()) {
-								DeclareVariableInBlock(daa, nestedSubBlock, type, variableName, allowPassIntoLoops, ilVariable);
+								DeclareVariableInBlock(daa, nestedSubBlock, type, variableName, v, allowPassIntoLoops);
 							}
 						}
 					}
 				}
 			} else {
 				// Try converting an assignment expression into a VariableDeclarationStatement
-				if (!TryConvertAssignmentExpressionIntoVariableDeclaration(declarationPoint, type, variableName, ilVariable)) {
+				if (!TryConvertAssignmentExpressionIntoVariableDeclaration(declarationPoint, type, variableName)) {
 					// Declare the variable in front of declarationPoint
-					variablesToDeclare.Add(new VariableToDeclare { Type = type, Name = variableName, InsertionPoint = declarationPoint, Variable = ilVariable });
+					variablesToDeclare.Add(new VariableToDeclare { Type = type, Name = variableName, ILVariable = v, InsertionPoint = declarationPoint });
 				}
 			}
 		}
 
-		bool TryConvertAssignmentExpressionIntoVariableDeclaration(Statement declarationPoint, AstType type, string variableName, ILVariable ilVariable)
+		bool TryConvertAssignmentExpressionIntoVariableDeclaration(Statement declarationPoint, AstType type, string variableName)
 		{
 			// convert the declarationPoint into a VariableDeclarationStatement
 			ExpressionStatement es = declarationPoint as ExpressionStatement;
 			if (es != null) {
-				return TryConvertAssignmentExpressionIntoVariableDeclaration(es.Expression, type, variableName, ilVariable);
+				return TryConvertAssignmentExpressionIntoVariableDeclaration(es.Expression, type, variableName);
 			}
 			return false;
 		}
-
-		bool TryConvertAssignmentExpressionIntoVariableDeclaration(Expression expression, AstType type, string variableName, ILVariable ilVariable)
+		
+		bool TryConvertAssignmentExpressionIntoVariableDeclaration(Expression expression, AstType type, string variableName)
 		{
 			AssignmentExpression ae = expression as AssignmentExpression;
 			if (ae != null && ae.Operator == AssignmentOperatorType.Assign) {
 				IdentifierExpression ident = ae.Left as IdentifierExpression;
 				if (ident != null && ident.Identifier == variableName) {
-					variablesToDeclare.Add(new VariableToDeclare { Type = type, Name = variableName, ReplacedAssignment = ae, Variable = ilVariable });
+					variablesToDeclare.Add(new VariableToDeclare { Type = type, Name = variableName, ILVariable = ident.Annotation<ILVariable>(), ReplacedAssignment = ae });
 					return true;
 				}
 			}
