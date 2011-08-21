@@ -33,6 +33,8 @@ namespace ICSharpCode.Decompiler.Ast
 		readonly Stack<AstNode> nodeStack = new Stack<AstNode>();
 		int braceLevelWithinType = -1;
 		bool inDocumentationComment = false;
+		bool firstUsingDeclaration;
+		bool lastUsingDeclaration;
 		
 		public TextOutputFormatter(ITextOutput output)
 		{
@@ -60,6 +62,11 @@ namespace ICSharpCode.Decompiler.Ast
 			if (memberRef != null) {
 				output.WriteReference(identifier, memberRef, true);
 				return;
+			}
+
+			if (firstUsingDeclaration) {
+				output.MarkFoldStart(defaultCollapsed: true);
+				firstUsingDeclaration = false;
 			}
 
 			output.Write(identifier);
@@ -183,6 +190,10 @@ namespace ICSharpCode.Decompiler.Ast
 		
 		public void NewLine()
 		{
+			if (lastUsingDeclaration) {
+				output.MarkFoldEnd();
+				lastUsingDeclaration = false;
+			}
 			output.WriteLine();
 		}
 		
@@ -249,10 +260,25 @@ namespace ICSharpCode.Decompiler.Ast
 					attributesCount = n.Attributes.Count;
 				node.AddAnnotation(new TextOutputLocation { Line = output.Location.Line + attributesCount, Column = output.Location.Column});
 			}
-			
+
+			if (nodeStack.Count == 0) {
+				if (IsUsingDeclaration(node)) {
+					firstUsingDeclaration = !IsUsingDeclaration(node.PrevSibling);
+					lastUsingDeclaration = !IsUsingDeclaration(node.NextSibling);
+				} else {
+					firstUsingDeclaration = false;
+					lastUsingDeclaration = false;
+				}
+			}
+
 			nodeStack.Push(node);
 		}
 		
+		private bool IsUsingDeclaration(AstNode node)
+		{
+			return node is UsingDeclaration || node is UsingAliasDeclaration;
+		}
+
 		public void EndNode(AstNode node)
 		{
 			if (nodeStack.Pop() != node)
