@@ -35,14 +35,14 @@ namespace ICSharpCode.Decompiler.Ast
 		bool inDocumentationComment = false;
 		bool firstUsingDeclaration;
 		bool lastUsingDeclaration;
-		
+
 		public TextOutputFormatter(ITextOutput output)
 		{
 			if (output == null)
 				throw new ArgumentNullException("output");
 			this.output = output;
 		}
-		
+
 		public void WriteIdentifier(string identifier)
 		{
 			var definition = GetCurrentDefinition();
@@ -50,7 +50,7 @@ namespace ICSharpCode.Decompiler.Ast
 				output.WriteDefinition(identifier, definition, false);
 				return;
 			}
-			
+
 			object memberRef = GetCurrentMemberReference();
 
 			if (memberRef != null) {
@@ -82,7 +82,13 @@ namespace ICSharpCode.Decompiler.Ast
 		{
 			AstNode node = nodeStack.Peek();
 			MemberReference memberRef = node.Annotation<MemberReference>();
-			if (memberRef == null && node.Role == AstNode.Roles.TargetExpression && (node.Parent is InvocationExpression || node.Parent is ObjectCreateExpression)) {
+			bool useParentReference;
+			if(memberRef != null)
+				useParentReference = node.Role == AstNode.Roles.Type && node.Parent is ObjectCreateExpression;
+			else
+				useParentReference = node.Role == AstNode.Roles.TargetExpression &&
+									 (node.Parent is InvocationExpression || node.Parent is ObjectCreateExpression);
+			if (useParentReference) {
 				memberRef = node.Parent.Annotation<MemberReference>();
 			}
 			return memberRef;
@@ -95,14 +101,11 @@ namespace ICSharpCode.Decompiler.Ast
 			if (variable != null) {
 				if (variable.OriginalParameter != null)
 					return variable.OriginalParameter;
-				//if (variable.OriginalVariable != null)
-				//    return variable.OriginalVariable;
 				return variable;
 			}
 
 			var gotoStatement = node as GotoStatement;
-			if (gotoStatement != null)
-			{
+			if (gotoStatement != null) {
 				var method = nodeStack.Select(nd => nd.Annotation<MethodReference>()).FirstOrDefault(mr => mr != null);
 				if (method != null)
 					return method.ToString() + gotoStatement.Label;
@@ -123,17 +126,12 @@ namespace ICSharpCode.Decompiler.Ast
 				if (variable != null) {
 					if (variable.OriginalParameter != null)
 						return variable.OriginalParameter;
-					//if (variable.OriginalVariable != null)
-					//    return variable.OriginalVariable;
 					return variable;
-				} else {
-
 				}
 			}
 
 			var label = node as LabelStatement;
-			if (label != null)
-			{
+			if (label != null) {
 				var method = nodeStack.Select(nd => nd.Annotation<MethodReference>()).FirstOrDefault(mr => mr != null);
 				if (method != null)
 					return method.ToString() + label.Label;
@@ -141,28 +139,35 @@ namespace ICSharpCode.Decompiler.Ast
 
 			return null;
 		}
-		
+
 		object GetCurrentDefinition()
 		{
 			if (nodeStack == null || nodeStack.Count == 0)
 				return null;
-			
+
 			var node = nodeStack.Peek();
 			if (IsDefinition(node))
 				return node.Annotation<MemberReference>();
-			
+
 			var fieldDef = node.Parent.Annotation<FieldDefinition>();
 			if (fieldDef != null)
 				return node.Parent.Annotation<MemberReference>();
 
 			return null;
 		}
-		
+
 		public void WriteKeyword(string keyword)
 		{
-			output.Write(keyword);
+			var node = nodeStack.Peek();
+			MemberReference mr = null;
+			if (node is ConstructorInitializer)
+				mr = node.Annotation<MemberReference>();
+			if(mr != null)
+				output.WriteReference(keyword, mr);
+			else
+				output.Write(keyword);
 		}
-		
+
 		public void WriteToken(string token)
 		{
 			// Attach member reference to token only if there's no identifier in the current node.
@@ -173,12 +178,12 @@ namespace ICSharpCode.Decompiler.Ast
 			else
 				output.Write(token);
 		}
-		
+
 		public void Space()
 		{
 			output.Write(' ');
 		}
-		
+
 		public void OpenBrace(BraceStyle style)
 		{
 			if (braceLevelWithinType >= 0 || nodeStack.Peek() is TypeDeclaration)
@@ -190,7 +195,7 @@ namespace ICSharpCode.Decompiler.Ast
 			output.WriteLine("{");
 			output.Indent();
 		}
-		
+
 		public void CloseBrace(BraceStyle style)
 		{
 			output.Unindent();
@@ -200,17 +205,17 @@ namespace ICSharpCode.Decompiler.Ast
 			if (braceLevelWithinType >= 0)
 				braceLevelWithinType--;
 		}
-		
+
 		public void Indent()
 		{
 			output.Indent();
 		}
-		
+
 		public void Unindent()
 		{
 			output.Unindent();
 		}
-		
+
 		public void NewLine()
 		{
 			if (lastUsingDeclaration) {
@@ -219,7 +224,7 @@ namespace ICSharpCode.Decompiler.Ast
 			}
 			output.WriteLine();
 		}
-		
+
 		public void WriteComment(CommentType commentType, string content)
 		{
 			switch (commentType) {
@@ -251,7 +256,7 @@ namespace ICSharpCode.Decompiler.Ast
 					break;
 			}
 		}
-		
+
 		public void WritePreProcessorDirective(PreProcessorDirectiveType type, string argument)
 		{
 			// pre-processor directive must start on its own line
@@ -263,11 +268,11 @@ namespace ICSharpCode.Decompiler.Ast
 			}
 			output.WriteLine();
 		}
-		
+
 		Stack<TextLocation> startLocations = new Stack<TextLocation>();
 		MemberMapping currentMemberMapping;
 		Stack<MemberMapping> parentMemberMappings = new Stack<MemberMapping>();
-		
+
 		public void StartNode(AstNode node)
 		{
 			if (nodeStack.Count == 0) {
@@ -281,17 +286,17 @@ namespace ICSharpCode.Decompiler.Ast
 			}
 			nodeStack.Push(node);
 			startLocations.Push(output.Location);
-			
+
 			if (node is AttributedNode && node.Annotation<MemberReference>() != null && node.GetChildByRole(AstNode.Roles.Identifier).IsNull)
 				output.WriteDefinition("", node.Annotation<MemberReference>(), false);
-			
+
 			MemberMapping mapping = node.Annotation<MemberMapping>();
 			if (mapping != null) {
 				parentMemberMappings.Push(currentMemberMapping);
 				currentMemberMapping = mapping;
 			}
 		}
-		
+
 		private bool IsUsingDeclaration(AstNode node)
 		{
 			return node is UsingDeclaration || node is UsingAliasDeclaration;
@@ -301,9 +306,9 @@ namespace ICSharpCode.Decompiler.Ast
 		{
 			if (nodeStack.Pop() != node)
 				throw new InvalidOperationException();
-			
+
 			var startLocation = startLocations.Pop();
-			
+
 			// code mappings
 			if (currentMemberMapping != null) {
 				var ranges = node.Annotation<List<ILRange>>();
@@ -311,7 +316,8 @@ namespace ICSharpCode.Decompiler.Ast
 					// add all ranges
 					foreach (var range in ranges) {
 						currentMemberMapping.MemberCodeMappings.Add(
-							new SourceCodeMapping {
+							new SourceCodeMapping
+							{
 								ILInstructionOffset = range,
 								StartLocation = startLocation,
 								EndLocation = output.Location,
@@ -320,14 +326,14 @@ namespace ICSharpCode.Decompiler.Ast
 					}
 				}
 			}
-			
-			
+
+
 			if (node.Annotation<MemberMapping>() != null) {
 				output.AddDebuggerMemberMapping(currentMemberMapping);
 				currentMemberMapping = parentMemberMappings.Pop();
 			}
 		}
-		
+
 		private static bool IsDefinition(AstNode node)
 		{
 			return
@@ -336,7 +342,7 @@ namespace ICSharpCode.Decompiler.Ast
 				node is DestructorDeclaration ||
 				node is EventDeclaration ||
 				node is DelegateDeclaration ||
-				node is OperatorDeclaration||
+				node is OperatorDeclaration ||
 				node is MemberDeclaration ||
 				node is TypeDeclaration;
 		}
